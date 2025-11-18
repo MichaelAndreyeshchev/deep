@@ -1,0 +1,24 @@
+[
+  {
+    "id": "SRC-groundworks-10k",
+    "title": "Groundworks Holdings 2024 10-K",
+    "type": "pdf",
+    "reliabilityScore": 0.94,
+    "notes": "Public filing containing national revenue + margin benchmarks"
+  },
+  {
+    "id": "SRC-waterproofing-outlook",
+    "title": "US Basement Waterproofing Outlook 2024",
+    "type": "pdf",
+    "reliabilityScore": 0.87,
+    "notes": "Industry sizing study cited for TAM/SAM splits"
+  },
+  {
+    "id": "SRC-alpha-expert-88213",
+    "title": "AlphaSense Expert Call #88213",
+    "type": "transcript",
+    "reliabilityScore": 0.71,
+    "notes": "Former COO at regional waterproofing dealer; referenced for labor + customer voice insights"
+  }
+]
+

@@ -1,0 +1,25 @@
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "lib": ["ES2020", "DOM"],
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "isolatedModules": true,
+    "allowSyntheticDefaultImports": true,
+    "resolveJsonModule": true,
+    "baseUrl": ".",
+    "paths": {
+      "@vectorless/core": ["packages/core/src/index.ts"],
+      "@vectorless/core/*": ["packages/core/src/*"],
+      "@vectorless/db": ["packages/db/src/index.ts"],
+      "@vectorless/db/*": ["packages/db/src/*"],
+      "@vectorless/ui": ["packages/ui/src/index.ts"],
+      "@vectorless/ui/*": ["packages/ui/src/*"]
+    }
+  }
+}
+

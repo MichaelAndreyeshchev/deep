@@ -1,17 +1,21 @@
 import type { Metadata } from 'next';
 import { Toaster } from 'sonner';
+import { ColorSchemeScript, MantineProvider } from '@mantine/core';
+import { Notifications } from '@mantine/notifications';
 
 import { ThemeProvider } from '@/components/theme-provider';
 import { Analytics } from '@vercel/analytics/react';
 import { DeepResearchProvider } from '@/lib/deep-research-context';
+import { theme } from '@/lib/mantine-theme';
 
 import './globals.css';
+import './mantine-styles.css';
 
 export const metadata: Metadata = {
   metadataBase: new URL('https://extract.chat'),
-  title: 'Extract Chat - by Firecrawl',
+  title: 'Open Deep Research',
   description:
-    'Extract Chat allows you to extract information from any website with the help of an AI chatbot.',
+    'An Open-Source Deep Research tool that uses AI to search the web and extract structured information.',
 };
 
 export const viewport = {
@@ -53,6 +57,7 @@ export default async function RootLayout({
       suppressHydrationWarning
     >
       <head>
+        <ColorSchemeScript defaultColorScheme="dark" />
         <script
           dangerouslySetInnerHTML={{
             __html: THEME_COLOR_SCRIPT,
@@ -60,17 +65,20 @@ export default async function RootLayout({
         />
       </head>
       <body className="antialiased">
-        <ThemeProvider
-          attribute="class"
-          defaultTheme="light"
-          enableSystem
-          disableTransitionOnChange
-        >
-          <DeepResearchProvider>
-            <Toaster position="top-center" />
-            {children}
-          </DeepResearchProvider>
-        </ThemeProvider>
+        <MantineProvider theme={theme} defaultColorScheme="dark">
+          <Notifications />
+          <ThemeProvider
+            attribute="class"
+            defaultTheme="dark"
+            enableSystem={false}
+            disableTransitionOnChange
+          >
+            <DeepResearchProvider>
+              <Toaster position="top-center" />
+              {children}
+            </DeepResearchProvider>
+          </ThemeProvider>
+        </MantineProvider>
         <Analytics />
       </body>
     </html>

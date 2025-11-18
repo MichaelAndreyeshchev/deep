@@ -17,12 +17,12 @@ services:
   app:
     build: .
     ports:
-      - "3000:3000"
+      - "13000:3000"
     env_file:
       - .env
     environment:
       <<: [*postgres-config, *redis-config, *minio-config]
-      NEXTAUTH_URL: http://localhost:3000
+      NEXTAUTH_URL: http://localhost:13000
       NEXTAUTH_SECRET: ${AUTH_SECRET}
       # Required for Docker setup
       NEXTAUTH_URL_INTERNAL: http://app:3000
@@ -42,7 +42,7 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
     ports:
-      - "5432:5432"
+      - "15432:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres}"]
       interval: 5s
@@ -52,7 +52,7 @@ services:
   redis:
     image: redis:alpine
     ports:
-      - "6379:6379"
+      - "16379:6379"
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -62,8 +62,8 @@ services:
   minio:
     image: minio/minio
     ports:
-      - "9000:9000"
-      - "9001:9001"
+      - "19000:9000"
+      - "19001:9001"
     volumes:
       - minio_data:/data
     environment:

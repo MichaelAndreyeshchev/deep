@@ -1,0 +1,22 @@
+{
+  "name": "vectorless-monorepo",
+  "private": true,
+  "packageManager": "pnpm@9.12.0",
+  "scripts": {
+    "dev:web": "pnpm --filter web dev",
+    "dev:worker": "pnpm --filter ingest-worker dev",
+    "dev": "concurrently \"pnpm dev:web\" \"pnpm dev:worker\"",
+    "build": "pnpm --filter web build",
+    "lint": "pnpm --filter web lint",
+    "db:migrate": "pnpm --filter @vectorless/db prisma:migrate",
+    "db:generate": "pnpm --filter @vectorless/db prisma:generate",
+    "db:studio": "pnpm --filter @vectorless/db prisma:studio",
+    "start": "pnpm --filter web start"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.0"
+  },
+  "dependencies": {
+    "pnpm": "^10.22.0"
+  }
+}

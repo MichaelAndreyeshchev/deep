@@ -1,0 +1,9 @@
+.data
+node_modules
+apps/**/.next
+apps/**/node_modules
+packages/**/dist
+.git
+.env*
+Dockerfile
+

@@ -36,22 +36,203 @@ import {
 } from '@/lib/utils';
 
 import { generateTitleFromUserMessage } from '../../actions';
-import FirecrawlApp from '@mendable/firecrawl-js';
+import OpenAI from 'openai';
 
 type AllowedTools =
   | 'deepResearch'
+  | 'askClarifyingQuestions'
   | 'search'
   | 'extract'
   | 'scrape';
 
+// Domain blocklist for low-quality sources
+const BLOCKED_DOMAINS = [
+  'fortunebusinessinsights.com',
+  'grandviewresearch.com',
+  'polarismarketresearch.com',
+  'psmarketresearch.com',
+  'insightaceanalytic.com',
+  'globenewswire.com',
+  'introspectivemarketresearch.com',
+  'straitsresearch.com',
+  'credenceresearch.com',
+  'theinsightpartners.com',
+  'marketsandmarkets.com',
+  'transparencymarketresearch.com',
+  'focusreports.store',
+  'myconsultingcoach.com',
+  'github.com',
+  'precedenceresearch.com',
+  'futuremarketinsights.com',
+  'expertmarketresearch.com',
+  'marketdataforecast.com',
+];
 
-const firecrawlTools: AllowedTools[] = ['search', 'extract', 'scrape'];
+// Helper function to check if a URL is from a blocked domain
+function isBlockedDomain(url: string): boolean {
+  try {
+    const hostname = new URL(url).hostname.toLowerCase();
+    return BLOCKED_DOMAINS.some(domain => 
+      hostname === domain || hostname.endsWith(`.${domain}`)
+    );
+  } catch {
+    return false;
+  }
+}
 
-const allTools: AllowedTools[] = [...firecrawlTools, 'deepResearch'];
+const webSearchTools: AllowedTools[] = ['search', 'extract', 'scrape'];
 
-const app = new FirecrawlApp({
-  apiKey: process.env.FIRECRAWL_API_KEY || '',
+const allTools: AllowedTools[] = [...webSearchTools, 'askClarifyingQuestions', 'deepResearch'];
+
+// Initialize OpenAI client for web search
+// Use a dummy key during build time to prevent build failures
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY || 'sk-dummy-key-for-build-time',
 });
+
+// Helper function to perform web search using OpenAI's native tool
+async function performWebSearch(query: string, maxResults: number = 10) {
+  try {
+    if (!process.env.OPENAI_API_KEY) {
+      throw new Error('OPENAI_API_KEY is not configured');
+    }
+    
+    const response = await openai.responses.create({
+      model: 'gpt-4o-mini',
+      tools: [{ type: 'web_search_preview' }],
+      input: `Search for: ${query}. Return the top ${maxResults} most relevant results with titles, URLs, and descriptions.`,
+    });
+
+    // Extract search results from the response
+    const searchResults: any[] = [];
+    
+    // Parse citations from the response and filter blocked domains
+    if (response.output && Array.isArray(response.output)) {
+      for (const item of response.output) {
+        if (item.type === 'message' && item.content) {
+          for (const content of item.content) {
+            if (content.type === 'output_text' && content.annotations) {
+              for (const annotation of content.annotations) {
+                if (annotation.type === 'url_citation') {
+                  // Skip blocked domains
+                  if (isBlockedDomain(annotation.url)) {
+                    continue;
+                  }
+                  
+                  const url = new URL(annotation.url);
+                  searchResults.push({
+                    title: annotation.title || url.hostname,
+                    url: annotation.url,
+                    description: content.text.substring(
+                      annotation.start_index,
+                      Math.min(annotation.end_index, annotation.start_index + 200)
+                    ),
+                    favicon: `https://www.google.com/s2/favicons?domain=${url.hostname}&sz=32`,
+                  });
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+    
+    // Filter out any remaining blocked domains
+    const filteredResults = searchResults.filter(result => !isBlockedDomain(result.url));
+    
+    return {
+      success: true,
+      data: filteredResults.slice(0, maxResults),
+    };
+  } catch (error: any) {
+    console.error('Search error:', error);
+    return {
+      success: false,
+      error: error.message,
+      data: [],
+    };
+  }
+}
+
+// Helper function to scrape/extract content from a URL using OpenAI
+async function scrapeUrl(url: string) {
+  try {
+    if (!process.env.OPENAI_API_KEY) {
+      throw new Error('OPENAI_API_KEY is not configured');
+    }
+    
+    // Check if domain is blocked
+    if (isBlockedDomain(url)) {
+      return {
+        success: false,
+        error: 'Domain is blocked due to low quality content',
+      };
+    }
+    
+    const response = await openai.responses.create({
+      model: 'gpt-4o-mini',
+      tools: [{ type: 'web_search_preview' }],
+      input: `Please visit ${url} and extract all the main content from this webpage in markdown format.`,
+    });
+
+    const text = response.output_text || '';
+    
+    return {
+      success: true,
+      markdown: text,
+    };
+  } catch (error: any) {
+    console.error('Scraping error:', error);
+    return {
+      success: false,
+      error: error.message,
+    };
+  }
+}
+
+// Helper function to extract structured data from URLs using OpenAI
+async function extractFromUrls(urls: string[], prompt: string) {
+  try {
+    if (!process.env.OPENAI_API_KEY) {
+      throw new Error('OPENAI_API_KEY is not configured');
+    }
+    
+    // Filter out blocked domains
+    const allowedUrls = urls.filter(url => !isBlockedDomain(url));
+    
+    if (allowedUrls.length === 0) {
+      return {
+        success: false,
+        error: 'All provided URLs are from blocked domains',
+        data: [],
+      };
+    }
+    
+    const urlList = allowedUrls.join(', ');
+    const response = await openai.responses.create({
+      model: 'gpt-4o-mini',
+      tools: [{ type: 'web_search_preview' }],
+      input: `Visit these URLs: ${urlList}. ${prompt}. Return the extracted data in a structured format.`,
+    });
+
+    const extractedData = response.output_text || '';
+    
+    return {
+      success: true,
+      data: allowedUrls.map((url) => ({
+        data: extractedData,
+        url: url,
+      })),
+    };
+  } catch (error: any) {
+    console.error('Extraction error:', error);
+    return {
+      success: false,
+      error: error.message,
+      data: [],
+    };
+  }
+}
 
 // const reasoningModel = customModel(process.env.REASONING_MODEL || 'o1-mini', true);
 
@@ -186,7 +367,7 @@ export async function POST(request: Request) {
         system: systemPrompt,
         messages: coreMessages,
         maxSteps: 10,
-        experimental_activeTools: experimental_deepResearch ? allTools : firecrawlTools,
+        experimental_activeTools: experimental_deepResearch ? allTools : webSearchTools,
         tools: {
           search: {
             description:
@@ -202,7 +383,7 @@ export async function POST(request: Request) {
             }),
             execute: async ({ query, maxResults = 5 }) => {
               try {
-                const searchResult = await app.search(query);
+                const searchResult = await performWebSearch(query, maxResults);
 
                 if (!searchResult.success) {
                   return {
@@ -210,18 +391,6 @@ export async function POST(request: Request) {
                     success: false,
                   };
                 }
-
-                // Add favicon URLs to search results
-                const resultsWithFavicons = searchResult.data.map((result: any) => {
-                  const url = new URL(result.url);
-                  const favicon = `https://www.google.com/s2/favicons?domain=${url.hostname}&sz=32`;
-                  return {
-                    ...result,
-                    favicon
-                  };
-                });
-
-                searchResult.data = resultsWithFavicons;
 
                 return {
                   data: searchResult.data,
@@ -249,25 +418,22 @@ export async function POST(request: Request) {
             }),
             execute: async ({ urls, prompt }) => {
               try {
-                const scrapeResult = await app.extract(urls, {
-                  prompt,
-                });
+                const extractResult = await extractFromUrls(urls, prompt);
 
-                if (!scrapeResult.success) {
+                if (!extractResult.success) {
                   return {
-                    error: `Failed to extract data: ${scrapeResult.error}`,
+                    error: `Failed to extract data: ${extractResult.error}`,
                     success: false,
                   };
                 }
 
                 return {
-                  data: scrapeResult.data,
+                  data: extractResult.data,
                   success: true,
                 };
               } catch (error: any) {
                 console.error('Extraction error:', error);
                 console.error(error.message);
-                console.error(error.error);
                 return {
                   error: `Extraction failed: ${error.message}`,
                   success: false,
@@ -283,11 +449,11 @@ export async function POST(request: Request) {
             }),
             execute: async ({ url }: { url: string }) => {
               try {
-                const scrapeResult = await app.scrapeUrl(url);
+                const scrapeResult = await scrapeUrl(url);
 
                 if (!scrapeResult.success) {
                   return {
-                    error: `Failed to extract data: ${scrapeResult.error}`,
+                    error: `Failed to scrape data: ${scrapeResult.error}`,
                     success: false,
                   };
                 }
@@ -295,23 +461,63 @@ export async function POST(request: Request) {
                 return {
                   data:
                     scrapeResult.markdown ??
-                    'Could get the page content, try using search or extract',
+                    'Could not get the page content, try using search or extract',
                   success: true,
                 };
               } catch (error: any) {
-                console.error('Extraction error:', error);
+                console.error('Scraping error:', error);
                 console.error(error.message);
-                console.error(error.error);
                 return {
-                  error: `Extraction failed: ${error.message}`,
+                  error: `Scraping failed: ${error.message}`,
                   success: false,
+                };
+              }
+            },
+          },
+          askClarifyingQuestions: {
+            description:
+              'Ask clarifying questions before starting deep research to ensure complete understanding of the research scope and requirements. Always use this before deepResearch.',
+            parameters: z.object({
+              topic: z.string().describe('The research topic or question'),
+              maxQuestions: z.number().optional().default(4).describe('Maximum number of clarifying questions to ask (default 4)'),
+            }),
+            execute: async ({ topic, maxQuestions = 4 }) => {
+              try {
+                const clarifyingPrompt = `You are a research lead preparing to scope a commercial due diligence task on: "${topic}"
+
+Your goal is to ask concise clarifying questions to fully understand the research scope before beginning.
+
+Guidelines:
+- Ask ${maxQuestions} focused questions maximum
+- Focus on: market scope, geographic regions, specific metrics needed, target audience, time horizon
+- Use bullet point formatting
+- Be specific and actionable
+- Examples: "Which geographic markets should I focus on?", "What specific metrics are most important?", "Are you looking at a specific company or the overall market?"
+
+Return your clarifying questions in a clear, numbered format.`;
+
+                const response = await generateText({
+                  model: customModel(reasoningModel.apiIdentifier, true),
+                  maxTokens: 1000,
+                  prompt: clarifyingPrompt,
+                });
+
+                return {
+                  success: true,
+                  questions: response.text,
+                  message: 'Please answer these questions, then I will proceed with comprehensive research.',
+                };
+              } catch (error: any) {
+                return {
+                  success: false,
+                  error: error.message,
                 };
               }
             },
           },
           deepResearch: {
             description:
-              'Perform deep research on a topic using an AI agent that coordinates search, extract, and analysis tools with reasoning steps.',
+              'Perform deep research on a topic using an AI agent that coordinates search, extract, and analysis tools with reasoning steps. Should be used after askClarifyingQuestions.',
             parameters: z.object({
               topic: z.string().describe('The topic or question to research'),
             }),
@@ -428,7 +634,7 @@ export async function POST(request: Request) {
                 }
               };
 
-              const extractFromUrls = async (urls: string[]) => {
+              const extractFromUrlsDeep = async (urls: string[]) => {
                 const extractPromises = urls.map(async (url) => {
                   try {
                     addActivity({
@@ -439,9 +645,7 @@ export async function POST(request: Request) {
                       depth: researchState.currentDepth,
                     });
 
-                    const result = await app.extract([url], {
-                      prompt: `Extract key information about ${topic}. Focus on facts, data, and expert opinions. Analysis should be full of details and very comprehensive.`,
-                    });
+                    const result = await extractFromUrls([url], `Extract key information about ${topic}. Focus on facts, data, and expert opinions. Analysis should be full of details and very comprehensive.`);
 
                     if (result.success) {
                       addActivity({
@@ -500,7 +704,7 @@ export async function POST(request: Request) {
                   });
 
                   let searchTopic = researchState.nextSearchTopic || topic;
-                  const searchResult = await app.search(searchTopic);
+                  const searchResult = await performWebSearch(searchTopic);
 
                   if (!searchResult.success) {
                     addActivity({
@@ -543,7 +747,7 @@ export async function POST(request: Request) {
                     .slice(0, 3)
                     .map((result: any) => result.url);
 
-                  const newFindings = await extractFromUrls([
+                  const newFindings = await extractFromUrlsDeep([
                     researchState.urlToSearch,
                     ...topUrls,
                   ]);
@@ -599,46 +803,194 @@ export async function POST(request: Request) {
                   topic = analysis.gaps.shift() || topic;
                 }
 
-                // Final synthesis
+                // Final synthesis - Generate structured report with citations
                 addActivity({
                   type: 'synthesis',
                   status: 'pending',
-                  message: 'Preparing final analysis',
+                  message: 'Preparing final research report',
                   timestamp: new Date().toISOString(),
                   depth: researchState.currentDepth,
                 });
 
-                const finalAnalysis = await generateText({
+                // Create citation map
+                const citationMap = new Map<string, number>();
+                const sources: Array<{ id: number; url: string; title: string }> = [];
+                let citationCounter = 1;
+
+                researchState.findings.forEach((finding) => {
+                  if (!citationMap.has(finding.source)) {
+                    citationMap.set(finding.source, citationCounter);
+                    try {
+                      const url = new URL(finding.source);
+                      sources.push({
+                        id: citationCounter,
+                        url: finding.source,
+                        title: url.hostname,
+                      });
+                    } catch {
+                      sources.push({
+                        id: citationCounter,
+                        url: finding.source,
+                        title: finding.source,
+                      });
+                    }
+                    citationCounter++;
+                  }
+                });
+
+                const finalReport = await generateText({
                   model: customModel(reasoningModel.apiIdentifier, true),
                   maxTokens: 16000,
-                  prompt: `Create a comprehensive long analysis of ${topic} based on these findings:
-                          ${researchState.findings
-                      .map((f) => `[From ${f.source}]: ${f.text}`)
-                      .join('\n')}
-                          ${researchState.summaries
-                            .map((s) => `[Summary]: ${s}`)
-                            .join('\n')}
-                          Provide all the thoughts processes including findings details,key insights, conclusions, and any remaining uncertainties. Include citations to sources where appropriate. This analysis should be very comprehensive and full of details. It is expected to be very long, detailed and comprehensive.`,
+                  prompt: `You are an investment analyst with decades of experience understanding Private Equity strategies and producing commercial due diligence like a McKinsey and Bain consultant. Your goal is to advise private equity investors with commercial due diligence reports.
+
+RESEARCH TOPIC: "${topic}"
+
+WORKING STYLE:
+- Source traceability: For EVERY evidence point, provide inline citation [N] and link to the source
+- Source quality: Prioritize reputable sources (McKinsey, BCG, Bain, SEC filings, Gartner) over less reputable market research
+- Confidence heat-bar: Traffic-light score each data point:
+  * 🟢 Green = reported figure from reliable source
+  * 🟡 Amber = extrapolated from partial data / questionable source  
+  * 🔴 Red = assumption
+- Benchmark sanity checks: Ensure all figures reconcile (e.g., company revenue < TAM)
+
+APPROACH:
+- Think step-by-step before concluding
+- Highly structured, logical sections where all facts reconcile
+- Avoid fluff or buzzwords, focus on critical insights
+- Be concise and professional
+
+IMPORTANT CITATION REQUIREMENTS:
+- After EVERY factual claim, you MUST add an inline citation with the actual source link
+- Use this EXACT format: (Source: [Source Name] - [Full URL])
+- For example: "Market reached $4.2B in 2024 (Source: Gartner 2024 - https://gartner.com/report)"
+- You can also use numbered format [N] but ALWAYS include the actual source link inline as well
+- Include confidence indicators (🟢🟡🔴) where appropriate
+
+Available Sources with FULL URLs:
+${researchState.findings
+  .map((f, idx) => {
+    const citNum = citationMap.get(f.source);
+    try {
+      const url = new URL(f.source);
+      return `[${citNum}] ${url.hostname}\nFull URL: ${f.source}\nContent: ${f.text}\n`;
+    } catch {
+      return `[${citNum}] ${f.source}\nContent: ${f.text}\n`;
+    }
+  })
+  .join('\n')}
+
+CRITICAL: Every factual claim must include BOTH:
+1. The inline source link: (Source: Gartner - https://gartner.com/report)
+2. Optional numbered citation [N] for cross-reference
+
+Previous Analysis Summaries:
+${researchState.summaries.join('\n\n')}
+
+Generate a COMMERCIAL DUE DILIGENCE REPORT following this structure:
+
+# ${topic}
+
+## 0. Front Matter
+- Research topic and scope [N]
+- Methodology: Sources used, data cutoff date [N]
+- Number of sources consulted: ${sources.length}
+
+## 1. Executive Summary (3-4 paragraphs)
+- Market snapshot: size, growth, profitability [N]
+- Key drivers: 2-3 headline catalysts [N]
+- Top investment theses [N]
+- Risks & red flags [N]
+
+## 2. Market 101
+### A. Problem Space & Workflow
+[Describe where pain exists and who experiences it [N]]
+
+### B. Value Chain & Revenue Pools
+[Map suppliers → products → end-users [N]]
+
+### C. Market Segmentation
+[Segment by vertical, customer size, geography [N]]
+
+### D. TAM/SAM/SOM Sizing
+[Triangulated market sizing with confidence indicators 🟢🟡🔴 [N]]
+
+### E. Growth Drivers & Inhibitors
+[Rank-ordered drivers with evidence [N]]
+
+### F. Unit Economics
+[Gross margins, retention, payback periods [N]]
+
+## 3. Competitive Landscape
+### A. Market Structure
+[Fragmentation vs concentration analysis [N]]
+
+### B. Top Vendors
+[Key players, market share, positioning [N]]
+
+### C. M&A Activity
+[Recent deals, multiples, trends [N]]
+
+### D. White Space Analysis
+[Unmet needs, opportunities [N]]
+
+## 4. Customer Voice
+[Decision-maker personas, buying criteria, pain points [N]]
+
+## 5. Investment Theses
+[3-5 specific theses with sizing of prize, PE value-add, and risks [N]]
+
+## 6. Target Universe (if applicable)
+[Potential acquisition targets or market participants [N]]
+
+## 7. Value Creation Playbook
+[100-day plan, tech modernization, GTM acceleration [N]]
+
+## 8. Risks & Sensitivities
+[Macro, technological, execution risks [N]]
+
+## 9. References & Bibliography
+${sources.map((s) => `[${s.id}] ${s.title} - ${s.url}`).join('\n')}
+
+CRITICAL REQUIREMENTS:
+- Every factual statement must have inline citation [N]  
+- Add confidence indicators (🟢🟡🔴) to quantitative claims
+- Ensure all figures reconcile and make sense together
+- Focus on actionable insights for PE investors
+- Be comprehensive, detailed, and professionally formatted`,
                 });
 
                 addActivity({
                   type: 'synthesis',
                   status: 'complete',
-                  message: 'Research completed',
+                  message: 'Research report completed',
                   timestamp: new Date().toISOString(),
                   depth: researchState.currentDepth,
                 });
 
+                // Send the structured report with findings
                 dataStream.writeData({
-                  type: 'finish',
-                  content: finalAnalysis.text,
+                  type: 'research-report',
+                  content: {
+                    report: finalReport.text,
+                    citations: sources,
+                    findings: researchState.findings,
+                    metadata: {
+                      topic,
+                      completedSteps: researchState.completedSteps,
+                      totalSteps: researchState.totalExpectedSteps,
+                      duration: Date.now() - startTime,
+                      sourcesCount: sources.length,
+                    },
+                  },
                 });
 
                 return {
                   success: true,
                   data: {
                     findings: researchState.findings,
-                    analysis: finalAnalysis.text,
+                    analysis: finalReport.text,
+                    citations: sources,
                     completedSteps: researchState.completedSteps,
                     totalSteps: researchState.totalExpectedSteps,
                   },

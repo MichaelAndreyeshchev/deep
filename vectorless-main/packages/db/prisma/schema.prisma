@@ -1,0 +1,254 @@
+// Prisma schema for the Vectorless research workspace
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+enum RunStatus {
+  DRAFT
+  INGESTING
+  CLARIFYING
+  RUNNING
+  COMPLETED
+  FAILED
+}
+
+enum ConversationRole {
+  user
+  assistant
+  system
+}
+
+enum DocumentStatus {
+  pending
+  processing
+  ready
+  failed
+}
+
+enum SourceType {
+  pdf
+  transcript
+  web
+  manual
+}
+
+enum VerificationStatus {
+  pending
+  success
+  warning
+  failed
+}
+
+enum ReportSectionType {
+  FRONT_MATTER
+  EXECUTIVE_SUMMARY
+  MARKET_101
+  COMPETITIVE_LANDSCAPE
+  CUSTOMER_VOICE
+  INVESTMENT_THESES
+  TARGET_UNIVERSE
+  VALUE_CREATION
+  RISKS
+  APPENDIX
+}
+
+enum OrchestratorPhase {
+  ingest
+  clarify
+  rewrite
+  research
+  verify
+  report
+}
+
+model ResearchRun {
+  id               String          @id @default(cuid())
+  title            String
+  status           RunStatus       @default(DRAFT)
+  orchestratorPhase OrchestratorPhase?
+  backgroundJobId  String?
+  prompt           Json?
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+
+  conversationTurns ConversationTurn[]
+  documents         Document[]
+  progressEvents    ProgressEvent[]
+  reportSections    ReportSection[]
+  citations         Citation[]
+  methodologyEntries MethodologyEntry[]
+  auditLogs         AuditLog[]
+}
+
+model ConversationTurn {
+  id        String            @id @default(cuid())
+  runId     String
+  role      ConversationRole
+  content   Json
+  createdAt DateTime          @default(now())
+
+  run ResearchRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+}
+
+model Document {
+  id           String         @id @default(cuid())
+  runId        String?
+  filename     String
+  mimetype     String
+  pageCount    Int?
+  storagePath  String
+  status       DocumentStatus @default(pending)
+  checksum     String?
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+
+  run      ResearchRun? @relation(fields: [runId], references: [id], onDelete: SetNull)
+  source   Source?
+  chunks   Chunk[]
+}
+
+model Source {
+  id               String      @id @default(cuid())
+  type             SourceType
+  title            String
+  url              String?
+  documentId       String?     @unique
+  author           String?
+  publishedAt      DateTime?
+  pageRange        String?
+  reliabilityScore Float?
+  createdAt        DateTime    @default(now())
+
+  document Document? @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  citations Citation[]
+  transcript InterviewTranscript?
+}
+
+model Chunk {
+  id            String    @id @default(cuid())
+  documentId    String?
+  transcriptSegmentId String? @unique
+  orderIndex    Int
+  pageNumber    Int?
+  heading       String?
+  text          String
+  citationKey   String
+  metadata      Json?
+  createdAt     DateTime  @default(now())
+
+  document  Document?          @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  transcriptSegment TranscriptSegment? @relation(fields: [transcriptSegmentId], references: [id], onDelete: Cascade)
+  citations Citation[]
+}
+
+model Citation {
+  id             String             @id @default(cuid())
+  runId          String
+  sectionId      String?
+  sourceId       String?
+  chunkId        String?
+  inlineAnchor   String
+  verificationStatus VerificationStatus @default(pending)
+  confidenceNote String?
+  createdAt      DateTime           @default(now())
+
+  run     ResearchRun    @relation(fields: [runId], references: [id], onDelete: Cascade)
+  section ReportSection? @relation(fields: [sectionId], references: [id], onDelete: Cascade)
+  source  Source?        @relation(fields: [sourceId], references: [id], onDelete: SetNull)
+  chunk   Chunk?         @relation(fields: [chunkId], references: [id], onDelete: SetNull)
+}
+
+model InterviewTranscript {
+  id          String             @id @default(cuid())
+  sourceId    String             @unique
+  company     String?
+  interviewee String?
+  interviewer String?
+  recordedAt  DateTime?
+  metadata    Json?
+  createdAt   DateTime           @default(now())
+
+  source   Source      @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+  segments TranscriptSegment[]
+}
+
+model TranscriptSegment {
+  id            String    @id @default(cuid())
+  transcriptId  String
+  speaker       String?
+  orderIndex    Int       @default(0)
+  startsAtMs    Int?
+  endsAtMs      Int?
+  sentiment     String?
+  text          String
+  createdAt     DateTime  @default(now())
+
+  transcript InterviewTranscript @relation(fields: [transcriptId], references: [id], onDelete: Cascade)
+  chunk      Chunk?
+}
+
+model ProgressEvent {
+  id        String           @id @default(cuid())
+  runId     String
+  phase     OrchestratorPhase
+  message   String
+  progress  Int              @default(0)
+  payload   Json?
+  createdAt DateTime         @default(now())
+
+  run ResearchRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+}
+
+model ReportSection {
+  id             String             @id @default(cuid())
+  runId          String
+  sectionType    ReportSectionType
+  content        Json
+  position       Int                @default(0)
+  autogenerated  Boolean            @default(true)
+  editedByUser   Boolean            @default(false)
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
+
+  run       ResearchRun          @relation(fields: [runId], references: [id], onDelete: Cascade)
+  citations Citation[]
+  comments  ReportSectionComment[]
+}
+
+model ReportSectionComment {
+  id         String       @id @default(cuid())
+  sectionId  String
+  author     String
+  body       String
+  createdAt  DateTime     @default(now())
+
+  section ReportSection @relation(fields: [sectionId], references: [id], onDelete: Cascade)
+}
+
+model MethodologyEntry {
+  id        String     @id @default(cuid())
+  runId     String
+  action    String
+  details   Json?
+  createdAt DateTime   @default(now())
+
+  run ResearchRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+}
+
+model AuditLog {
+  id        String    @id @default(cuid())
+  runId     String
+  actor     String
+  action    String
+  payload   Json?
+  createdAt DateTime  @default(now())
+
+  run ResearchRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+}
+

@@ -1,6 +1,6 @@
 # Open Deep Research
 
-An Open-Source clone of Open AI's Deep Research experiment. Instead of using a fine-tuned version of o3, this method uses [Firecrawl's extract + search](https://firecrawl.dev/) with a reasoning model to deep research the web.
+An Open-Source clone of Open AI's Deep Research experiment. This implementation uses OpenAI's native web search capabilities combined with reasoning models to perform comprehensive web research.
 
 Check out the demo [here](https://x.com/nickscamara_/status/1886459999905521912)
 
@@ -8,9 +8,12 @@ Check out the demo [here](https://x.com/nickscamara_/status/1886459999905521912)
 
 ## Features
 
-- [Firecrawl](https://firecrawl.dev) Search + Extract
-  - Feed realtime data to the AI via search
-  - Extract structured data from multiple websites via extract
+- **OpenAI Native Web Search**
+  - Uses OpenAI's built-in web search tool via Responses API
+  - Real-time access to current web information
+  - Automatic citation and source tracking
+  - Extract structured data from multiple websites
+  - No additional API keys required beyond OpenAI
 - [Next.js](https://nextjs.org) App Router
   - Advanced routing for seamless navigation and performance
   - React Server Components (RSCs) and Server Actions for server-side rendering and increased performance
@@ -47,34 +50,70 @@ Learn more about it [here](https://vercel.com/docs/functions/configuring-functio
 
 You can deploy your own version of the Next.js AI Chatbot to Vercel with one click:
 
-[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2Fnickscamara%2Fopen-deep-research&env=AUTH_SECRET,OPENAI_API_KEY,OPENROUTER_API_KEY,FIRECRAWL_API_KEY,BLOB_READ_WRITE_TOKEN,POSTGRES_URL,UPSTASH_REDIS_REST_URL,UPSTASH_REDIS_REST_TOKEN,REASONING_MODEL,BYPASS_JSON_VALIDATION,TOGETHER_API_KEY,MAX_DURATION&envDescription=Learn%20more%20about%20how%20to%20get%20the%20API%20Keys%20for%20the%20application&envLink=https%3A%2F%2Fgithub.com%2Fvercel%2Fai-chatbot%2Fblob%2Fmain%2F.env.example&demo-title=AI%20Chatbot&demo-description=An%20Open-Source%20AI%20Chatbot%20Template%20Built%20With%20Next.js%20and%20the%20AI%20SDK%20by%20Vercel.&demo-url=https%3A%2F%2Fchat.vercel.ai&stores=[{%22type%22:%22postgres%22},{%22type%22:%22blob%22}])
+[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2Fnickscamara%2Fopen-deep-research&env=AUTH_SECRET,OPENAI_API_KEY,OPENROUTER_API_KEY,BLOB_READ_WRITE_TOKEN,POSTGRES_URL,UPSTASH_REDIS_REST_URL,UPSTASH_REDIS_REST_TOKEN,REASONING_MODEL,BYPASS_JSON_VALIDATION,TOGETHER_API_KEY,MAX_DURATION&envDescription=Learn%20more%20about%20how%20to%20get%20the%20API%20Keys%20for%20the%20application&envLink=https%3A%2F%2Fgithub.com%2Fvercel%2Fai-chatbot%2Fblob%2Fmain%2F.env.example&demo-title=AI%20Chatbot&demo-description=An%20Open-Source%20AI%20Chatbot%20Template%20Built%20With%20Next.js%20and%20the%20AI%20SDK%20by%20Vercel.&demo-url=https%3A%2F%2Fchat.vercel.ai&stores=[{%22type%22:%22postgres%22},{%22type%22:%22blob%22}])
 
 ## Running locally
 
-You will need to use the environment variables [defined in `.env.example`](.env.example) to run Next.js AI Chatbot. It's recommended you use [Vercel Environment Variables](https://vercel.com/docs/projects/environment-variables) for this, but a `.env` file is all that is necessary.
+You will need to set up environment variables to run Open Deep Research. It's recommended you use [Vercel Environment Variables](https://vercel.com/docs/projects/environment-variables) for this, but a `.env` file is all that is necessary.
 
-> Note: You should not commit your `.env` file or it will expose secrets that will allow others to control access to your various OpenAI and authentication provider accounts.
+> Note: You should not commit your `.env` file or it will expose secrets that will allow others to control access to your various API accounts.
 
-1. Install Vercel CLI: `npm i -g vercel`
-2. Link local instance with Vercel and GitHub accounts (creates `.vercel` directory): `vercel link`
-3. Download your environment variables: `vercel env pull`
+### Environment Variables
 
+Create a `.env` file in the root directory with the following variables:
+
+```bash
+# Authentication
+AUTH_SECRET=your_random_secret_here  # Generate with: openssl rand -base64 32
+
+# AI Models (REQUIRED)
+OPENAI_API_KEY=sk-...                    # Required for both AI and web search
+
+# Optional: Alternative AI Providers
+OPENROUTER_API_KEY=sk-...                # For OpenRouter models (optional)
+TOGETHER_API_KEY=...                     # For TogetherAI models (optional)
+
+# Database (PostgreSQL)
+POSTGRES_URL=postgresql://user:password@localhost:5432/dbname
+
+# Redis (for rate limiting)
+UPSTASH_REDIS_REST_URL=...
+UPSTASH_REDIS_REST_TOKEN=...
+
+# File Storage (Vercel Blob or MinIO)
+BLOB_READ_WRITE_TOKEN=...
+
+# Reasoning Model (optional)
+REASONING_MODEL=gpt-4o                   # or deepseek-ai/DeepSeek-R1
+BYPASS_JSON_VALIDATION=false             # Set to true for non-OpenAI models
+
+# Function Duration
+MAX_DURATION=300                         # 300 seconds (5 min) or 60 for Vercel Hobby
+```
+
+### Get API Keys
+
+**OpenAI API** (Required): 
+- Get your API key from [platform.openai.com/api-keys](https://platform.openai.com/api-keys)
+- This single key provides both AI capabilities and web search functionality
+- Web search is included with OpenAI's Responses API
+
+### Installation Steps
+
+```bash
 # 1. First install all dependencies
-```bash
 pnpm install
-```
 
-# 2. Then run database migrations
-```bash
+# 2. Set up your .env file with the variables above
+
+# 3. Run database migrations
 pnpm db:migrate
-```
 
-# 3. Run the app
-```bash
+# 4. Run the app
 pnpm dev
 ```
 
-Your app template should now be running on [localhost:3000](http://localhost:3000/).
+Your app should now be running on [localhost:3000](http://localhost:3000/).
 
 
 # Models dependencies

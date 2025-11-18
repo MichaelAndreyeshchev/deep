@@ -1,0 +1,311 @@
+/* Import Mantine core styles */
+@import '@mantine/core/styles.css';
+@import '@mantine/notifications/styles.css';
+@import '@mantine/dropzone/styles.css';
+
+/* Custom color variables */
+:root {
+  --color-text: #d5bbff;
+  --color-text-s: #f7edffff;
+  --color-bg: #40384C;
+  --color-code-bg: #231c2f86;
+  --color-nav: #231C2F;
+  --color-chat-bar: #2A2235;
+  --color-scrollbar: #635b70ff;
+  --color-scrollbar-hover: #978ca4ff;
+  --main-surface-secondary: #40384C;
+  --color-nav-danger: #51001a;
+  --main-surface-secondary-c: #40384C !important;
+  
+  /* Mantine color overrides */
+  --mantine-color-body: #40384C;
+  --mantine-color-text: #f7edffff;
+}
+
+/* Global text color */
+* {
+  color: var(--color-text-s);
+  scrollbar-color: var(--color-scrollbar) transparent;
+}
+
+*:hover {
+  scrollbar-color: var(--color-scrollbar-hover) transparent;
+}
+
+/* Body styles */
+body {
+  color: var(--color-text);
+  background: var(--color-bg);
+}
+
+/* Headings */
+h1, h2, h3, h4, h5, h6 {
+  color: var(--color-text);
+}
+
+/* Code blocks */
+code {
+  background-color: var(--color-code-bg) !important;
+}
+
+p.placeholder {
+  color: var(--color-text) !important;
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar {
+  width: 12px;
+  height: 12px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--color-scrollbar);
+  border-radius: 6px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-scrollbar-hover);
+}
+
+/*───────────────────────────────────────────────
+|           Mantine Component Overrides          |
+───────────────────────────────────────────────*/
+
+.mantine-Paper-root {
+  background-color: var(--color-chat-bar);
+  color: var(--color-text-s);
+}
+
+.mantine-Button-root {
+  background-color: var(--color-nav);
+  color: #fff;
+}
+
+.mantine-Button-root:hover {
+  background-color: #45385d;
+}
+
+.mantine-TextInput-input,
+.mantine-Textarea-input,
+.mantine-Select-input,
+.mantine-NumberInput-input {
+  background-color: var(--color-chat-bar);
+  color: var(--color-text-s);
+  border-color: var(--color-scrollbar);
+}
+
+.mantine-TextInput-input::placeholder,
+.mantine-Textarea-input::placeholder,
+.mantine-Select-input::placeholder {
+  color: var(--color-text);
+  opacity: 0.6;
+}
+
+.mantine-Modal-content,
+.mantine-Modal-header {
+  background-color: var(--color-chat-bar);
+}
+
+.mantine-Modal-title {
+  color: var(--color-text);
+}
+
+.mantine-Tabs-tab[data-active] {
+  background-color: var(--color-bg);
+  border-color: var(--color-text);
+  color: var(--color-text-s);
+}
+
+.mantine-Tabs-tab:not([data-active]) {
+  color: var(--color-text);
+}
+
+.mantine-Card-root {
+  background-color: var(--color-chat-bar);
+  border-color: var(--color-scrollbar);
+}
+
+.mantine-Menu-dropdown {
+  background-color: var(--color-chat-bar);
+  border-color: var(--color-scrollbar);
+}
+
+.mantine-Menu-item {
+  color: var(--color-text-s);
+}
+
+.mantine-Menu-item:hover {
+  background-color: var(--color-bg);
+}
+
+.mantine-Tooltip-tooltip {
+  background-color: var(--color-nav);
+  color: var(--color-text-s);
+}
+
+.mantine-Notification-root {
+  background-color: var(--color-chat-bar);
+  border-color: var(--color-scrollbar);
+}
+
+.mantine-Alert-root {
+  background-color: var(--color-chat-bar);
+  border-color: var(--color-scrollbar);
+}
+
+.mantine-Select-dropdown,
+.mantine-MultiSelect-dropdown {
+  background-color: var(--color-chat-bar);
+  border-color: var(--color-scrollbar);
+}
+
+.mantine-Select-option,
+.mantine-MultiSelect-option {
+  color: var(--color-text-s);
+}
+
+.mantine-Select-option:hover,
+.mantine-MultiSelect-option:hover {
+  background-color: var(--color-bg);
+}
+
+/*───────────────────────────────────────────────
+|               Highlight.JS Styles              |
+───────────────────────────────────────────────*/
+
+[dir=ltr] code.hljs,
+[dir=ltr] code[class*=language-],
+[dir=ltr] pre[class*=language-] {
+  background: #1f182a !important;
+}
+
+.overflow-y-auto.p-4,
+pre {
+  background: #1f182a !important;
+}
+
+.hljs-keyword {
+  color: #ab82ff !important;
+  font-weight: bold;
+}
+
+.hljs-string {
+  color: #c4a7e7 !important;
+}
+
+.hljs-function .hljs-title,
+.hljs-title {
+  color: #ae81ff !important;
+  font-weight: bold;
+}
+
+.hljs-params {
+  color: #f8f8f2 !important;
+}
+
+.hljs-number {
+  color: #d291e4 !important;
+}
+
+.hljs-comment {
+  color: #6c6783 !important;
+  font-style: italic;
+}
+
+.hljs-variable {
+  color: #ff92df !important;
+}
+
+.hljs-class .hljs-title {
+  color: #b2a1ff !important;
+  font-weight: bold;
+}
+
+.hljs-built_in {
+  color: #ffd700 !important;
+  font-weight: bold;
+}
+
+.hljs-attr,
+.hljs-attribute {
+  color: #e7c7ff !important;
+}
+
+.hljs-operator {
+  color: #ff79c6 !important;
+}
+
+.hljs-type {
+  color: #a9a1ff !important;
+}
+
+.hljs-punctuation {
+  color: #f8f8f2 !important;
+}
+
+.hljs-tag {
+  color: #ff6ac1 !important;
+  font-weight: bold;
+}
+
+.hljs-value {
+  color: #ff92df !important;
+}
+
+.hljs-literal {
+  color: #f78c6c !important;
+}
+
+.hljs-error {
+  color: #ff5370 !important;
+  font-weight: bold;
+}
+
+.hljs-strong {
+  font-weight: bold;
+}
+
+.hljs-emphasis {
+  font-style: italic;
+}
+
+/*───────────────────────────────────────────────
+|          Research Report Specific              |
+───────────────────────────────────────────────*/
+
+.research-report-citation {
+  display: inline-flex;
+  align-items: center;
+  color: #ab82ff;
+  text-decoration: none;
+  font-weight: 500;
+  margin: 0 2px;
+  padding: 0 4px;
+  border-radius: 3px;
+  transition: all 0.2s;
+}
+
+.research-report-citation:hover {
+  background-color: rgba(171, 130, 255, 0.1);
+  color: #c4a7e7;
+}
+
+.research-report-findings {
+  background-color: var(--color-code-bg);
+  border-left: 3px solid var(--color-text);
+  padding: 12px;
+  margin: 8px 0;
+  border-radius: 4px;
+}
+
+.research-report-finding-source {
+  color: var(--color-text);
+  font-size: 0.85em;
+  font-style: italic;
+  margin-top: 4px;
+}
+

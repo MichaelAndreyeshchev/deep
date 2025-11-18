@@ -18,9 +18,5 @@ RUN pnpm build
 # Expose the port the app runs on
 EXPOSE 3000
 
-# Create a startup script
-COPY start.sh /start.sh
-RUN chmod +x /start.sh
-
-# Start the application using the startup script
-CMD ["/start.sh"]
+# Start the application with migrations
+CMD ["sh", "-c", "pnpm run db:migrate && pnpm start"]

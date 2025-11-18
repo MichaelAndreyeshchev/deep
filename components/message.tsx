@@ -22,6 +22,7 @@ import { DocumentPreview } from './document-preview';
 import { SearchResults } from './search-results';
 import { ExtractResults } from './extract-results';
 import { ScrapeResults } from './scrape-results';
+import { ResearchReportMantine } from './research-report-mantine';
 import { useDeepResearch } from '@/lib/deep-research-context';
 import { Progress } from './ui/progress';
 
@@ -58,6 +59,20 @@ const PurePreviewMessage = ({
     source: string;
     relevance: number;
   }>>([]);
+
+  // Track research report
+  const [researchReport, setResearchReport] = useState<{
+    report: string;
+    citations: Array<{ id: number; url: string; title: string }>;
+    metadata: {
+      topic: string;
+      completedSteps: number;
+      totalSteps: number;
+      duration: number;
+      sourcesCount: number;
+    };
+    findings?: Array<{ text: string; source: string }>;
+  } | null>(null);
 
   useEffect(() => {
     if (message.toolInvocations) {
@@ -136,6 +151,14 @@ const PurePreviewMessage = ({
               toolInvocation.delta?.type === 'source-delta'
             ) {
               addSource(toolInvocation.delta.content);
+            }
+
+            // Handle research report
+            if (
+              'delta' in toolInvocation &&
+              toolInvocation.delta?.type === 'research-report'
+            ) {
+              setResearchReport(toolInvocation.delta.content);
             }
 
             // Handle final result
@@ -221,9 +244,13 @@ const PurePreviewMessage = ({
 
                 <div
                   className={cn('flex flex-col gap-4', {
-                    'bg-primary text-primary-foreground px-3 py-2 rounded-xl':
+                    'px-3 py-2 rounded-xl':
                       message.role === 'user',
                   })}
+                  style={message.role === 'user' ? {
+                    backgroundColor: '#6c757d',
+                    color: '#ffffff'
+                  } : undefined}
                 >
                   <Markdown>{message.content as string}</Markdown>
                 </div>
@@ -347,6 +374,16 @@ const PurePreviewMessage = ({
                   );
                 })}
               </div>
+            )}
+
+            {/* Research Report */}
+            {researchReport && (
+              <ResearchReportMantine
+                report={researchReport.report}
+                citations={researchReport.citations}
+                metadata={researchReport.metadata}
+                findings={researchReport.findings || []}
+              />
             )}
 
             {!isReadonly && (

@@ -31,7 +31,7 @@ export function ScrapeResults({
       <div className="w-full">
         <div className="flex items-center gap-2 mb-2">
           <span className="text-sm font-medium">
-            Using Firecrawl to scrape content...
+            Using OpenAI web search to scrape content...
           </span>
         </div>
         <div className="flex items-center gap-2 text-sm text-muted-foreground">

@@ -35,7 +35,7 @@ export function ExtractResults({
       <div className="w-full">
         <div className="flex items-center gap-2 mb-2">
           <span className="text-sm font-medium">
-            Using Firecrawl to extract data...
+            Using OpenAI web search to extract data...
           </span>
         </div>
         <div className="flex items-center gap-2 text-sm text-muted-foreground">
