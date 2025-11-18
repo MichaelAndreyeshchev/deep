@@ -15,6 +15,12 @@ COPY . .
 # Build the application without running migrations
 RUN pnpm build
 
+# Create uploads directory for local file storage
+RUN mkdir -p /app/public/uploads/documents/pdfs && \
+    mkdir -p /app/public/uploads/documents/markdowns && \
+    mkdir -p /app/public/uploads/documents/docxs && \
+    mkdir -p /app/public/uploads/documents/csvs
+
 # Expose the port the app runs on
 EXPOSE 3000
 

@@ -36,3 +36,6 @@ yarn-error.log*
 .vercel
 .vscode
 .env*.local
+
+# uploaded files
+public/uploads/

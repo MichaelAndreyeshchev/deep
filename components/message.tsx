@@ -26,6 +26,24 @@ import { ResearchReportMantine } from './research-report-mantine';
 import { useDeepResearch } from '@/lib/deep-research-context';
 import { Progress } from './ui/progress';
 
+type StreamCitation = {
+  id: number;
+  url: string;
+  title: string;
+  detail?: string;
+};
+
+type StreamFinding = {
+  text: string;
+  source: string;
+  section?: string;
+  page?: string;
+  confidence?: 'high' | 'medium' | 'low' | null;
+  metricLabel?: string | null;
+  metricValue?: number | null;
+  unit?: string | null;
+};
+
 const PurePreviewMessage = ({
   chatId,
   message,
@@ -63,7 +81,7 @@ const PurePreviewMessage = ({
   // Track research report
   const [researchReport, setResearchReport] = useState<{
     report: string;
-    citations: Array<{ id: number; url: string; title: string }>;
+    citations: StreamCitation[];
     metadata: {
       topic: string;
       completedSteps: number;
@@ -71,7 +89,7 @@ const PurePreviewMessage = ({
       duration: number;
       sourcesCount: number;
     };
-    findings?: Array<{ text: string; source: string }>;
+    findings?: StreamFinding[];
   } | null>(null);
 
   useEffect(() => {
@@ -467,7 +485,7 @@ const DeepResearchProgress = ({
     totalSteps?: number;
   }>;
 }) => {
-  const { state: deepResearchState } = useDeepResearch();
+  const { state: deepResearchState, updateProgress } = useDeepResearch();
   const [lastActivity, setLastActivity] = useState<string>('');
   const [startTime] = useState<number>(Date.now());
   const maxDuration = 5 * 60 * 1000; // 5 minutes in milliseconds
@@ -491,11 +509,10 @@ const DeepResearchProgress = ({
         lastItem.completedSteps !== undefined &&
         lastItem.totalSteps !== undefined
       ) {
-        deepResearchState.completedSteps = lastItem.completedSteps;
-        deepResearchState.totalExpectedSteps = lastItem.totalSteps;
+        updateProgress(lastItem.completedSteps, lastItem.totalSteps);
       }
     }
-  }, [activity, deepResearchState]);
+  }, [activity, updateProgress]);
 
   // Calculate overall progress
   const progress = useMemo(() => {
@@ -542,26 +559,29 @@ const DeepResearchProgress = ({
   const timeUntilTimeout = Math.max(maxDuration - (currentTime - startTime), 0);
 
   return (
-    <div className="w-full space-y-2">
+    <div className="w-full space-y-3 rounded-2xl border border-[var(--color-scrollbar)]/50 bg-[var(--color-chat-bar)]/70 p-4 shadow-lg shadow-violet-900/20 backdrop-blur">
       <div className="flex items-center justify-between text-sm text-muted-foreground">
-        <div className="flex flex-col gap-1">
-          <span>Research in progress...</span>
-          {/* Depth: {deepResearchState.currentDepth}/{deepResearchState.maxDepth} */}
-        </div>
-        <div className="flex flex-col items-end gap-1">
-          <span>{Math.round(progress)}%</span>
-          <span className="text-xs">
-            {/* Step {deepResearchState.completedSteps}/{deepResearchState.totalExpectedSteps} */}
+        <div className="flex flex-col gap-0.5 text-xs uppercase tracking-widest text-violet-200">
+          <span>{currentPhase || 'Research in progress'}</span>
+          <span className="text-[11px] text-muted-foreground">
+            Depth {deepResearchState.currentDepth}/{deepResearchState.maxDepth}
           </span>
+        </div>
+        <div className="text-lg font-semibold text-white">
+          {Math.round(progress)}%
         </div>
       </div>
       <Progress value={progress} className="w-full" />
-      <div className="flex items-center justify-end text-xs text-muted-foreground mt-2">
+      <div className="flex items-center justify-between text-xs text-muted-foreground">
         <span>Time until timeout: {formatTime(timeUntilTimeout)}</span>
-        {/* <span>{Math.round(timeProgress)}% of max time used</span> */}
+        <span>
+          Steps {deepResearchState.completedSteps}/
+          {deepResearchState.totalExpectedSteps || '—'}
+        </span>
       </div>
-      {/* <Progress value={timeProgress} className="w-full" /> */}
-      <div className="text-xs text-muted-foreground">{lastActivity}</div>
+      <div className="text-xs text-muted-foreground line-clamp-2">
+        {lastActivity}
+      </div>
     </div>
   );
 };

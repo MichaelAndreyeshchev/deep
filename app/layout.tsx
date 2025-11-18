@@ -79,7 +79,8 @@ export default async function RootLayout({
             </DeepResearchProvider>
           </ThemeProvider>
         </MantineProvider>
-        <Analytics />
+        {/* Only load Analytics in production/Vercel */}
+        {process.env.NEXT_PUBLIC_VERCEL_ENV && <Analytics />}
       </body>
     </html>
   );

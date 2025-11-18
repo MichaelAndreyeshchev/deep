@@ -27,8 +27,10 @@ import { SuggestedActions } from './suggested-actions';
 import equal from 'fast-deep-equal';
 import { useDeepResearch } from '@/lib/deep-research-context';
 import { DeepResearch } from './deep-research';
-import { Telescope, Search } from 'lucide-react';
+import { Telescope, Search, FolderOpen } from 'lucide-react';
 import { Tabs, TabsList, TabsTrigger } from './ui/tabs';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from './ui/dialog';
+import { DocumentManager } from './document-manager';
 
 type SearchMode = 'search' | 'deep-research';
 
@@ -279,6 +281,7 @@ function PureMultimodalInput({
 
       <div className="absolute bottom-0 p-2 flex flex-row gap-2 justify-start items-center">
         <AttachmentsButton fileInputRef={fileInputRef} isLoading={isLoading} />
+        <DocumentsButton isLoading={isLoading} />
         <Tabs value={searchMode} onValueChange={(value) => {
           setSearchMode(value as SearchMode);
         }}>
@@ -403,3 +406,36 @@ const SendButton = memo(PureSendButton, (prevProps, nextProps) => {
   if (prevProps.input !== nextProps.input) return false;
   return true;
 });
+
+function PureDocumentsButton({
+  isLoading,
+}: {
+  isLoading: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger asChild>
+        <Button
+          className="rounded-md p-[7px] h-fit dark:border-zinc-700 hover:dark:bg-zinc-900 hover:bg-zinc-200"
+          disabled={isLoading}
+          variant="ghost"
+          title="Manage Documents"
+        >
+          <FolderOpen size={14} />
+        </Button>
+      </DialogTrigger>
+      <DialogContent className="max-w-2xl max-h-[80vh] overflow-hidden flex flex-col">
+        <DialogHeader>
+          <DialogTitle>Document Manager</DialogTitle>
+        </DialogHeader>
+        <div className="overflow-y-auto flex-1">
+          <DocumentManager />
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+const DocumentsButton = memo(PureDocumentsButton);

@@ -1,6 +1,10 @@
+'use client';
+
 import { motion } from 'framer-motion';
 import { cn } from '@/lib/utils';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { useDeepResearch } from '@/lib/deep-research-context';
+import { Progress } from '@/components/ui/progress';
 
 interface DeepResearchProps {
   isActive: boolean;
@@ -32,12 +36,50 @@ export function DeepResearch({
   sources = [],
   deepResearch = true
 }: DeepResearchProps) {
+  const { state } = useDeepResearch();
+
+  const progress =
+    state.totalExpectedSteps > 0
+      ? Math.min(
+          (state.completedSteps / state.totalExpectedSteps) * 100,
+          100,
+        )
+      : 0;
+
+  const currentPhase = (() => {
+    if (!activity.length) return state.isActive ? 'Monitoring' : 'Idle';
+    const current = activity[activity.length - 1];
+    switch (current.type) {
+      case 'search':
+        return 'Searching';
+      case 'extract':
+        return 'Extracting';
+      case 'analyze':
+        return 'Analyzing';
+      case 'synthesis':
+        return 'Synthesizing';
+      default:
+        return 'Researching';
+    }
+  })();
+
   if (activity.length === 0 && sources.length === 0) {
     return null;
   }
 
   return (
     <div className="fixed right-4 top-20 w-80 bg-background border rounded-lg shadow-lg p-4 max-h-[80vh] flex flex-col overflow-y-scroll">
+      <div className="mb-3 rounded-xl border border-[var(--color-scrollbar)]/60 bg-[var(--color-chat-bar)]/60 p-3 shadow-sm shadow-violet-900/20">
+        <div className="flex items-center justify-between text-[11px] uppercase tracking-widest text-muted-foreground">
+          <span>{currentPhase}</span>
+          <span>{Math.round(progress)}%</span>
+        </div>
+        <Progress value={progress} className="mt-2 h-2.5" />
+        <div className="mt-2 text-[11px] text-muted-foreground">
+          Depth {state.currentDepth}/{state.maxDepth} · Steps{' '}
+          {state.completedSteps}/{state.totalExpectedSteps || '—'}
+        </div>
+      </div>
       <Tabs defaultValue={deepResearch ? "activity" : "sources"} className="flex flex-col h-full">
         <TabsList className="w-full">
           {deepResearch && <TabsTrigger value="activity" className="flex-1">

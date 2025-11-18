@@ -80,9 +80,107 @@ function isBlockedDomain(url: string): boolean {
   }
 }
 
+// Helper function to safely get hostname from URL
+function getHostname(url: string): string {
+  try {
+    return new URL(url).hostname;
+  } catch {
+    return url || 'unknown';
+  }
+}
+
 const webSearchTools: AllowedTools[] = ['search', 'extract', 'scrape'];
 
-const allTools: AllowedTools[] = [...webSearchTools, 'askClarifyingQuestions', 'deepResearch'];
+const allTools: AllowedTools[] = [
+  ...webSearchTools,
+  'askClarifyingQuestions',
+  'deepResearch',
+];
+
+type StructuredClaim = {
+  statement: string;
+  section?: string | null;
+  page?: string | null;
+  confidence?: 'high' | 'medium' | 'low' | null;
+  metricLabel?: string | null;
+  metricValue?: number | null;
+  unit?: string | null;
+};
+
+type ExtractResponse = {
+  url: string;
+  claims: StructuredClaim[];
+  raw: string;
+};
+
+type ResearchFinding = {
+  text: string;
+  source: string;
+  section?: string;
+  page?: string;
+  confidence?: 'high' | 'medium' | 'low' | null;
+  metricLabel?: string | null;
+  metricValue?: number | null;
+  unit?: string | null;
+};
+
+const extractionSchema = {
+  name: 'research_claims',
+  schema: {
+    type: 'object',
+    properties: {
+      claims: {
+        type: 'array',
+        description:
+          'List of precise factual statements pulled from the source.',
+        items: {
+          type: 'object',
+          properties: {
+            statement: {
+              type: 'string',
+              description:
+                'A single factual claim ready to cite verbatim. Include the exact number/value from the page.',
+            },
+            section: {
+              type: 'string',
+              description:
+                'Name of the section, heading, or subsection where the fact appears. Use "n/a" if unknown.',
+            },
+            page: {
+              type: 'string',
+              description:
+                'Page number or slide number where the fact appears. Use "n/a" if unknown.',
+            },
+            confidence: {
+              type: 'string',
+              enum: ['high', 'medium', 'low'],
+              description:
+                'Confidence level based on source quality and clarity.',
+            },
+            metricLabel: {
+              type: 'string',
+              description:
+                'Short label for the metric (e.g., Revenue 2024, CAGR).',
+            },
+            metricValue: {
+              type: 'number',
+              description:
+                'Numeric value associated with the fact, if applicable.',
+            },
+            unit: {
+              type: 'string',
+              description: 'Unit for the numeric value (%, $M, etc.).',
+            },
+          },
+          required: ['statement'],
+          additionalProperties: false,
+        },
+      },
+    },
+    required: ['claims'],
+    additionalProperties: false,
+  },
+} as const;
 
 // Initialize OpenAI client for web search
 // Use a dummy key during build time to prevent build failures
@@ -196,10 +294,10 @@ async function extractFromUrls(urls: string[], prompt: string) {
     if (!process.env.OPENAI_API_KEY) {
       throw new Error('OPENAI_API_KEY is not configured');
     }
-    
+
     // Filter out blocked domains
-    const allowedUrls = urls.filter(url => !isBlockedDomain(url));
-    
+    const allowedUrls = urls.filter((url) => !isBlockedDomain(url));
+
     if (allowedUrls.length === 0) {
       return {
         success: false,
@@ -207,22 +305,92 @@ async function extractFromUrls(urls: string[], prompt: string) {
         data: [],
       };
     }
-    
-    const urlList = allowedUrls.join(', ');
-    const response = await openai.responses.create({
-      model: 'gpt-4o-mini',
-      tools: [{ type: 'web_search_preview' }],
-      input: `Visit these URLs: ${urlList}. ${prompt}. Return the extracted data in a structured format.`,
+
+    const structuredPromises = allowedUrls.map(async (url) => {
+      const response = await openai.responses.create({
+        model: 'gpt-4o-mini',
+        tools: [{ type: 'web_search_preview' }],
+        input: `Visit ${url} and extract verifiable PE-style research facts. ${prompt}.
+
+Return your response as a JSON object with this structure:
+{
+  "claims": [
+    {
+      "statement": "factual claim here",
+      "section": "section name or 'n/a'",
+      "page": "page number or 'n/a'",
+      "confidence": "high|medium|low",
+      "metricLabel": "optional metric name",
+      "metricValue": optional number,
+      "unit": "optional unit like USD, % etc"
+    }
+  ]
+}
+
+If a section or page number is unavailable, use "n/a". Focus on extracting concrete facts with sources.`,
+      });
+
+      const outputText = response.output_text || '';
+      let parsedClaims: StructuredClaim[] = [];
+
+      try {
+        // Try to extract JSON from the response
+        const jsonMatch = outputText.match(/\{[\s\S]*"claims"[\s\S]*\}/);
+        if (jsonMatch) {
+          const parsed = JSON.parse(jsonMatch[0]);
+          if (Array.isArray(parsed?.claims)) {
+            parsedClaims = parsed.claims;
+          }
+        } else {
+          // Fallback: parse the whole response as JSON
+          const parsed = JSON.parse(outputText);
+          if (Array.isArray(parsed?.claims)) {
+            parsedClaims = parsed.claims;
+          }
+        }
+      } catch {
+        // If JSON parsing fails, treat the whole response as a single claim
+        parsedClaims = [
+          {
+            statement: outputText.trim(),
+            section: null,
+            page: null,
+            confidence: 'medium',
+          },
+        ];
+      }
+
+      const normalizedClaims = parsedClaims
+        .filter((claim) => claim?.statement)
+        .map((claim) => ({
+          statement: claim.statement,
+          section:
+            claim.section && claim.section.toLowerCase() !== 'n/a'
+              ? claim.section
+              : undefined,
+          page:
+            claim.page && claim.page.toLowerCase() !== 'n/a'
+              ? claim.page
+              : undefined,
+          confidence: claim.confidence ?? null,
+          metricLabel: claim.metricLabel ?? null,
+          metricValue:
+            typeof claim.metricValue === 'number' ? claim.metricValue : null,
+          unit: claim.unit ?? null,
+        }));
+
+      return {
+        url,
+        claims: normalizedClaims,
+        raw: outputText,
+      } as ExtractResponse;
     });
 
-    const extractedData = response.output_text || '';
-    
+    const structuredResults = await Promise.all(structuredPromises);
+
     return {
       success: true,
-      data: allowedUrls.map((url) => ({
-        data: extractedData,
-        url: url,
-      })),
+      data: structuredResults,
     };
   } catch (error: any) {
     console.error('Extraction error:', error);
@@ -526,7 +694,7 @@ Return your clarifying questions in a clear, numbered format.`;
               const timeLimit = 4.5 * 60 * 1000; // 4 minutes 30 seconds in milliseconds
 
               const researchState = {
-                findings: [] as Array<{ text: string; source: string }>,
+                findings: [] as ResearchFinding[],
                 summaries: [] as Array<string>,
                 nextSearchTopic: '',
                 urlToSearch: '',
@@ -637,32 +805,55 @@ Return your clarifying questions in a clear, numbered format.`;
               const extractFromUrlsDeep = async (urls: string[]) => {
                 const extractPromises = urls.map(async (url) => {
                   try {
+                    // Skip if URL is invalid
+                    if (!url) {
+                      console.warn('Skipping invalid URL:', url);
+                      return [];
+                    }
+
                     addActivity({
                       type: 'extract',
                       status: 'pending',
-                      message: `Analyzing ${new URL(url).hostname}`,
+                      message: `Analyzing ${getHostname(url)}`,
                       timestamp: new Date().toISOString(),
                       depth: researchState.currentDepth,
                     });
 
-                    const result = await extractFromUrls([url], `Extract key information about ${topic}. Focus on facts, data, and expert opinions. Analysis should be full of details and very comprehensive.`);
+                    const result = await extractFromUrls(
+                      [url],
+                      `Extract key information about ${topic}. Focus on facts, data, precise metrics, and expert opinions. Include section names and page references when available.`,
+                    );
 
-                    if (result.success) {
+                    if (result.success && Array.isArray(result.data)) {
                       addActivity({
                         type: 'extract',
                         status: 'complete',
-                        message: `Extracted from ${new URL(url).hostname}`,
+                        message: `Extracted from ${getHostname(url)}`,
                         timestamp: new Date().toISOString(),
                         depth: researchState.currentDepth,
                       });
 
-                      if (Array.isArray(result.data)) {
-                        return result.data.map((item) => ({
-                          text: item.data,
-                          source: url,
+                      return result.data.flatMap((entry) => {
+                        if (entry.claims.length === 0) {
+                          return [
+                            {
+                              text: entry.raw || 'No structured data returned.',
+                              source: entry.url,
+                            },
+                          ];
+                        }
+
+                        return entry.claims.map((claim) => ({
+                          text: claim.statement,
+                          source: entry.url,
+                          section: claim.section ?? undefined,
+                          page: claim.page ?? undefined,
+                          confidence: claim.confidence ?? null,
+                          metricLabel: claim.metricLabel ?? null,
+                          metricValue: claim.metricValue ?? null,
+                          unit: claim.unit ?? null,
                         }));
-                      }
-                      return [{ text: result.data, source: url }];
+                      });
                     }
                     return [];
                   } catch {
@@ -814,24 +1005,54 @@ Return your clarifying questions in a clear, numbered format.`;
 
                 // Create citation map
                 const citationMap = new Map<string, number>();
-                const sources: Array<{ id: number; url: string; title: string }> = [];
+                const sources: Array<{
+                  id: number;
+                  url: string;
+                  title: string;
+                  detail?: string;
+                }> = [];
                 let citationCounter = 1;
 
                 researchState.findings.forEach((finding) => {
-                  if (!citationMap.has(finding.source)) {
-                    citationMap.set(finding.source, citationCounter);
+                  const sourceKey = [
+                    finding.source,
+                    finding.section ?? '',
+                    finding.page ?? '',
+                  ]
+                    .filter(Boolean)
+                    .join('#');
+
+                  if (!citationMap.has(sourceKey)) {
+                    citationMap.set(sourceKey, citationCounter);
+                    const detailParts: string[] = [];
+                    if (finding.section) {
+                      detailParts.push(`Section: ${finding.section}`);
+                    }
+                    if (finding.page) {
+                      detailParts.push(`p. ${finding.page}`);
+                    }
+                    const detail = detailParts.join(' • ') || undefined;
+                    
+                    // Skip if source is missing
+                    if (!finding.source) {
+                      console.warn('Finding missing source:', finding);
+                      return;
+                    }
+                    
                     try {
                       const url = new URL(finding.source);
                       sources.push({
                         id: citationCounter,
                         url: finding.source,
                         title: url.hostname,
+                        detail,
                       });
                     } catch {
                       sources.push({
                         id: citationCounter,
                         url: finding.source,
                         title: finding.source,
+                        detail,
                       });
                     }
                     citationCounter++;
@@ -846,7 +1067,7 @@ Return your clarifying questions in a clear, numbered format.`;
 RESEARCH TOPIC: "${topic}"
 
 WORKING STYLE:
-- Source traceability: For EVERY evidence point, provide inline citation [N] and link to the source
+- Source traceability: For EVERY evidence point, provide inline citation [N]
 - Source quality: Prioritize reputable sources (McKinsey, BCG, Bain, SEC filings, Gartner) over less reputable market research
 - Confidence heat-bar: Traffic-light score each data point:
   * 🟢 Green = reported figure from reliable source
@@ -860,29 +1081,40 @@ APPROACH:
 - Avoid fluff or buzzwords, focus on critical insights
 - Be concise and professional
 
-IMPORTANT CITATION REQUIREMENTS:
-- After EVERY factual claim, you MUST add an inline citation with the actual source link
-- Use this EXACT format: (Source: [Source Name] - [Full URL])
-- For example: "Market reached $4.2B in 2024 (Source: Gartner 2024 - https://gartner.com/report)"
-- You can also use numbered format [N] but ALWAYS include the actual source link inline as well
-- Include confidence indicators (🟢🟡🔴) where appropriate
+CRITICAL CITATION FORMAT:
+- After EVERY factual claim, you MUST add an inline numbered citation [N]
+- Use ONLY this format: [N] where N is the citation number
+- Example: "Market reached $4.2B in 2024 [1]. Solar adoption increased 300% [2][3]."
+- You can use multiple citations for a single claim: [1][2]
+- Include confidence indicators (🟢🟡🔴) where appropriate: "Revenue of $100M [1] 🟢"
+- Do NOT include URLs in the text - only the numbered citations
+- When you know the exact section or page, mention it inline before the citation (e.g., "Section 3, p.12 [4]")
 
-Available Sources with FULL URLs:
+Available Sources (cite these by number):
 ${researchState.findings
-  .map((f, idx) => {
-    const citNum = citationMap.get(f.source);
+  .filter((f) => f.source) // Skip findings without sources
+  .map((f) => {
+    const sourceKey = [f.source, f.section ?? '', f.page ?? '']
+      .filter(Boolean)
+      .join('#');
+    const citNum = citationMap.get(sourceKey);
+    const detailParts: string[] = [];
+    if (f.section) detailParts.push(`Section: ${f.section}`);
+    if (f.page) detailParts.push(`p. ${f.page}`);
+    const detailLine = detailParts.length ? ` | ${detailParts.join(' • ')}` : '';
     try {
       const url = new URL(f.source);
-      return `[${citNum}] ${url.hostname}\nFull URL: ${f.source}\nContent: ${f.text}\n`;
+      return `[${citNum}] ${url.hostname}${detailLine}\nFull URL: ${f.source}\nContent: ${f.text}\n`;
     } catch {
-      return `[${citNum}] ${f.source}\nContent: ${f.text}\n`;
+      return `[${citNum}] ${f.source}${detailLine}\nContent: ${f.text}\n`;
     }
   })
   .join('\n')}
 
-CRITICAL: Every factual claim must include BOTH:
-1. The inline source link: (Source: Gartner - https://gartner.com/report)
-2. Optional numbered citation [N] for cross-reference
+CITATION RULES:
+1. Every factual claim needs [N] citation immediately after the claim
+2. Use only the number in brackets: [1], [2], [3], etc.
+3. The full source URLs will be shown in the References section automatically
 
 Previous Analysis Summaries:
 ${researchState.summaries.join('\n\n')}
@@ -895,6 +1127,13 @@ Generate a COMMERCIAL DUE DILIGENCE REPORT following this structure:
 - Research topic and scope [N]
 - Methodology: Sources used, data cutoff date [N]
 - Number of sources consulted: ${sources.length}
+
+### Citation System
+- Every claim must link to its exact source via inline [N]
+- Cite the precise section/page whenever provided in the source metadata
+- Maintain a running bibliography that mirrors the inline numbering
+- If a source spans multiple sections/pages, assign unique citation numbers so each chunk is traceable
+- When referencing paginated research/PDFs, include page indicators in prose (e.g., [4], p.12)
 
 ## 1. Executive Summary (3-4 paragraphs)
 - Market snapshot: size, growth, profitability [N]
@@ -950,7 +1189,12 @@ Generate a COMMERCIAL DUE DILIGENCE REPORT following this structure:
 [Macro, technological, execution risks [N]]
 
 ## 9. References & Bibliography
-${sources.map((s) => `[${s.id}] ${s.title} - ${s.url}`).join('\n')}
+${sources
+  .map(
+    (s) =>
+      `[${s.id}] ${s.title}${s.detail ? ` (${s.detail})` : ''} - ${s.url}`,
+  )
+  .join('\n')}
 
 CRITICAL REQUIREMENTS:
 - Every factual statement must have inline citation [N]  
