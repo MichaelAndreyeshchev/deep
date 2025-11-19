@@ -37,6 +37,7 @@ import {
 
 import { generateTitleFromUserMessage } from '../../actions';
 import OpenAI from 'openai';
+import { runAgentPipeline } from '@/lib/ai/deep-research-pipeline';
 
 type AllowedTools =
   | 'deepResearch'
@@ -484,13 +485,18 @@ export async function POST(request: Request) {
     return new Response('Failed to verify user', { status: 500 });
   }
 
-  // Apply rate limiting
-  const identifier = session.user.id;
-  const { success, limit, reset, remaining } =
-    await rateLimiter.limit(identifier);
+  // Apply rate limiting (skip if Redis is not properly configured)
+  try {
+    const identifier = session.user.id;
+    const { success, limit, reset, remaining } =
+      await rateLimiter.limit(identifier);
 
-  if (!success) {
-    return new Response(`Too many requests`, { status: 429 });
+    if (!success) {
+      return new Response(`Too many requests`, { status: 429 });
+    }
+  } catch (error) {
+    // Log rate limiting error but continue
+    console.warn('Rate limiting failed, continuing without it:', error);
   }
 
   const model = models.find((model) => model.id === modelId);
@@ -535,7 +541,7 @@ export async function POST(request: Request) {
         system: systemPrompt,
         messages: coreMessages,
         maxSteps: 10,
-        experimental_activeTools: experimental_deepResearch ? allTools : webSearchTools,
+        experimental_activeTools: allTools, // Always enable all tools including deepResearch
         tools: {
           search: {
             description:
@@ -685,579 +691,96 @@ Return your clarifying questions in a clear, numbered format.`;
           },
           deepResearch: {
             description:
-              'Perform deep research on a topic using an AI agent that coordinates search, extract, and analysis tools with reasoning steps. Should be used after askClarifyingQuestions.',
+              'Perform deep research using the four-agent pipeline: Triage → Clarifier/Instruction → Research. This automatically handles clarifications and research planning. Use this for any comprehensive research, market analysis, or report generation.',
             parameters: z.object({
               topic: z.string().describe('The topic or question to research'),
+              clarificationAnswers: z.record(z.string()).optional().describe('Answers to clarification questions if already collected'),
             }),
-            execute: async ({ topic, maxDepth = 7 }) => {
-              const startTime = Date.now();
-              const timeLimit = 4.5 * 60 * 1000; // 4 minutes 30 seconds in milliseconds
-
-              const researchState = {
-                findings: [] as ResearchFinding[],
-                summaries: [] as Array<string>,
-                nextSearchTopic: '',
-                urlToSearch: '',
-                currentDepth: 0,
-                failedAttempts: 0,
-                maxFailedAttempts: 3,
-                completedSteps: 0,
-                totalExpectedSteps: maxDepth * 5,
-              };
-
-              // Initialize progress tracking
-              dataStream.writeData({
-                type: 'progress-init',
-                content: {
-                  maxDepth,
-                  totalSteps: researchState.totalExpectedSteps,
-                },
-              });
-
-              const addSource = (source: {
-                url: string;
-                title: string;
-                description: string;
-              }) => {
-                dataStream.writeData({
-                  type: 'source-delta',
-                  content: source,
-                });
-              };
-
-              const addActivity = (activity: {
-                type:
-                | 'search'
-                | 'extract'
-                | 'analyze'
-                | 'reasoning'
-                | 'synthesis'
-                | 'thought';
-                status: 'pending' | 'complete' | 'error';
-                message: string;
-                timestamp: string;
-                depth: number;
-              }) => {
-                if (activity.status === 'complete') {
-                  researchState.completedSteps++;
-                }
-
-                dataStream.writeData({
-                  type: 'activity-delta',
-                  content: {
-                    ...activity,
-                    depth: researchState.currentDepth,
-                    completedSteps: researchState.completedSteps,
-                    totalSteps: researchState.totalExpectedSteps,
-                  },
-                });
-              };
-
-              const analyzeAndPlan = async (
-                findings: Array<{ text: string; source: string }>,
-              ) => {
-                try {
-                  const timeElapsed = Date.now() - startTime;
-                  const timeRemaining = timeLimit - timeElapsed;
-                  const timeRemainingMinutes =
-                    Math.round((timeRemaining / 1000 / 60) * 10) / 10;
-
-                  // Reasoning model
-                  const result = await generateText({
-                    model: customModel(reasoningModel.apiIdentifier, true),
-                    prompt: `You are a research agent analyzing findings about: ${topic}
-                            You have ${timeRemainingMinutes} minutes remaining to complete the research but you don't need to use all of it.
-                            Current findings: ${findings
-                        .map((f) => `[From ${f.source}]: ${f.text}`)
-                        .join('\n')}
-                            What has been learned? What gaps remain? What specific aspects should be investigated next if any?
-                            If you need to search for more information, include a nextSearchTopic.
-                            If you need to search for more information in a specific URL, include a urlToSearch.
-                            Important: If less than 1 minute remains, set shouldContinue to false to allow time for final synthesis.
-                            If I have enough information, set shouldContinue to false.
-                            
-                            Respond in this exact JSON format:
-                            {
-                              "analysis": {
-                                "summary": "summary of findings",
-                                "gaps": ["gap1", "gap2"],
-                                "nextSteps": ["step1", "step2"],
-                                "shouldContinue": true/false,
-                                "nextSearchTopic": "optional topic",
-                                "urlToSearch": "optional url"
-                              }
-                            }`,
-                  });
-
-                  try {
-                    const parsed = JSON.parse(result.text);
-                    return parsed.analysis;
-                  } catch (error) {
-                    console.error('Failed to parse JSON response:', error);
-                    return null;
-                  }
-                } catch (error) {
-                  console.error('Analysis error:', error);
-                  return null;
-                }
-              };
-
-              const extractFromUrlsDeep = async (urls: string[]) => {
-                const extractPromises = urls.map(async (url) => {
-                  try {
-                    // Skip if URL is invalid
-                    if (!url) {
-                      console.warn('Skipping invalid URL:', url);
-                      return [];
-                    }
-
-                    addActivity({
-                      type: 'extract',
-                      status: 'pending',
-                      message: `Analyzing ${getHostname(url)}`,
-                      timestamp: new Date().toISOString(),
-                      depth: researchState.currentDepth,
-                    });
-
-                    const result = await extractFromUrls(
-                      [url],
-                      `Extract key information about ${topic}. Focus on facts, data, precise metrics, and expert opinions. Include section names and page references when available.`,
-                    );
-
-                    if (result.success && Array.isArray(result.data)) {
-                      addActivity({
-                        type: 'extract',
-                        status: 'complete',
-                        message: `Extracted from ${getHostname(url)}`,
-                        timestamp: new Date().toISOString(),
-                        depth: researchState.currentDepth,
-                      });
-
-                      return result.data.flatMap((entry) => {
-                        if (entry.claims.length === 0) {
-                          return [
-                            {
-                              text: entry.raw || 'No structured data returned.',
-                              source: entry.url,
-                            },
-                          ];
-                        }
-
-                        return entry.claims.map((claim) => ({
-                          text: claim.statement,
-                          source: entry.url,
-                          section: claim.section ?? undefined,
-                          page: claim.page ?? undefined,
-                          confidence: claim.confidence ?? null,
-                          metricLabel: claim.metricLabel ?? null,
-                          metricValue: claim.metricValue ?? null,
-                          unit: claim.unit ?? null,
-                        }));
-                      });
-                    }
-                    return [];
-                  } catch {
-                    // console.warn(`Extraction failed for ${url}:`);
-                    return [];
-                  }
-                });
-
-                const results = await Promise.all(extractPromises);
-                return results.flat();
-              };
-
+            execute: async ({ topic, clarificationAnswers }) => {
               try {
-                while (researchState.currentDepth < maxDepth) {
-                  const timeElapsed = Date.now() - startTime;
-                  if (timeElapsed >= timeLimit) {
-                    break;
+                // Use the four-agent pipeline
+                const result = await runAgentPipeline(
+                  topic,
+                  clarificationAnswers,
+                  model.apiIdentifier,
+                  reasoningModel.apiIdentifier,
+                  {
+                    onActivity: (activity) => {
+                      dataStream.writeData({
+                        type: 'activity-delta',
+                        content: activity,
+                      });
+                    },
+                    onSource: (source) => {
+                      dataStream.writeData({
+                        type: 'source-delta',
+                        content: source,
+                      });
+                    },
+                    onProgress: (progress) => {
+                      dataStream.writeData(progress);
+                    },
+                    dataStream,
                   }
+                );
 
-                  researchState.currentDepth++;
-
+                if (result.needsClarification) {
+                  // Return clarification questions
                   dataStream.writeData({
-                    type: 'depth-delta',
+                    type: 'clarification-needed',
                     content: {
-                      current: researchState.currentDepth,
-                      max: maxDepth,
-                      completedSteps: researchState.completedSteps,
-                      totalSteps: researchState.totalExpectedSteps,
+                      questions: result.clarificationQuestions || [],
+                      agentFlow: result.agentFlow || '',
                     },
                   });
 
-                  // Search phase
-                  addActivity({
-                    type: 'search',
-                    status: 'pending',
-                    message: `Searching for "${topic}"`,
-                    timestamp: new Date().toISOString(),
-                    depth: researchState.currentDepth,
-                  });
-
-                  let searchTopic = researchState.nextSearchTopic || topic;
-                  const searchResult = await performWebSearch(searchTopic);
-
-                  if (!searchResult.success) {
-                    addActivity({
-                      type: 'search',
-                      status: 'error',
-                      message: `Search failed for "${searchTopic}"`,
-                      timestamp: new Date().toISOString(),
-                      depth: researchState.currentDepth,
-                    });
-
-                    researchState.failedAttempts++;
-                    if (
-                      researchState.failedAttempts >=
-                      researchState.maxFailedAttempts
-                    ) {
-                      break;
-                    }
-                    continue;
-                  }
-
-                  addActivity({
-                    type: 'search',
-                    status: 'complete',
-                    message: `Found ${searchResult.data.length} relevant results`,
-                    timestamp: new Date().toISOString(),
-                    depth: researchState.currentDepth,
-                  });
-
-                  // Add sources from search results
-                  searchResult.data.forEach((result: any) => {
-                    addSource({
-                      url: result.url,
-                      title: result.title,
-                      description: result.description,
-                    });
-                  });
-
-                  // Extract phase
-                  const topUrls = searchResult.data
-                    .slice(0, 3)
-                    .map((result: any) => result.url);
-
-                  const newFindings = await extractFromUrlsDeep([
-                    researchState.urlToSearch,
-                    ...topUrls,
-                  ]);
-                  researchState.findings.push(...newFindings);
-
-                  // Analysis phase
-                  addActivity({
-                    type: 'analyze',
-                    status: 'pending',
-                    message: 'Analyzing findings',
-                    timestamp: new Date().toISOString(),
-                    depth: researchState.currentDepth,
-                  });
-
-                  const analysis = await analyzeAndPlan(researchState.findings);
-                  researchState.nextSearchTopic =
-                    analysis?.nextSearchTopic || '';
-                  researchState.urlToSearch = analysis?.urlToSearch || '';
-                  researchState.summaries.push(analysis?.summary || '');
-
-                  console.log(analysis);
-                  if (!analysis) {
-                    addActivity({
-                      type: 'analyze',
-                      status: 'error',
-                      message: 'Failed to analyze findings',
-                      timestamp: new Date().toISOString(),
-                      depth: researchState.currentDepth,
-                    });
-
-                    researchState.failedAttempts++;
-                    if (
-                      researchState.failedAttempts >=
-                      researchState.maxFailedAttempts
-                    ) {
-                      break;
-                    }
-                    continue;
-                  }
-
-                  addActivity({
-                    type: 'analyze',
-                    status: 'complete',
-                    message: analysis.summary,
-                    timestamp: new Date().toISOString(),
-                    depth: researchState.currentDepth,
-                  });
-
-                  if (!analysis.shouldContinue || analysis.gaps.length === 0) {
-                    break;
-                  }
-
-                  topic = analysis.gaps.shift() || topic;
+                  return {
+                    success: true,
+                    needsClarification: true,
+                    questions: result.clarificationQuestions,
+                    message: 'Please answer these clarifying questions to proceed with the research.',
+                  };
                 }
 
-                // Final synthesis - Generate structured report with citations
-                addActivity({
-                  type: 'synthesis',
-                  status: 'pending',
-                  message: 'Preparing final research report',
-                  timestamp: new Date().toISOString(),
-                  depth: researchState.currentDepth,
-                });
-
-                // Create citation map
-                const citationMap = new Map<string, number>();
-                const sources: Array<{
-                  id: number;
-                  url: string;
-                  title: string;
-                  detail?: string;
-                }> = [];
-                let citationCounter = 1;
-
-                researchState.findings.forEach((finding) => {
-                  const sourceKey = [
-                    finding.source,
-                    finding.section ?? '',
-                    finding.page ?? '',
-                  ]
-                    .filter(Boolean)
-                    .join('#');
-
-                  if (!citationMap.has(sourceKey)) {
-                    citationMap.set(sourceKey, citationCounter);
-                    const detailParts: string[] = [];
-                    if (finding.section) {
-                      detailParts.push(`Section: ${finding.section}`);
-                    }
-                    if (finding.page) {
-                      detailParts.push(`p. ${finding.page}`);
-                    }
-                    const detail = detailParts.join(' • ') || undefined;
-                    
-                    // Skip if source is missing
-                    if (!finding.source) {
-                      console.warn('Finding missing source:', finding);
-                      return;
-                    }
-                    
-                    try {
-                      const url = new URL(finding.source);
-                      sources.push({
-                        id: citationCounter,
-                        url: finding.source,
-                        title: url.hostname,
-                        detail,
-                      });
-                    } catch {
-                      sources.push({
-                        id: citationCounter,
-                        url: finding.source,
-                        title: finding.source,
-                        detail,
-                      });
-                    }
-                    citationCounter++;
-                  }
-                });
-
-                const finalReport = await generateText({
-                  model: customModel(reasoningModel.apiIdentifier, true),
-                  maxTokens: 16000,
-                  prompt: `You are an investment analyst with decades of experience understanding Private Equity strategies and producing commercial due diligence like a McKinsey and Bain consultant. Your goal is to advise private equity investors with commercial due diligence reports.
-
-RESEARCH TOPIC: "${topic}"
-
-WORKING STYLE:
-- Source traceability: For EVERY evidence point, provide inline citation [N]
-- Source quality: Prioritize reputable sources (McKinsey, BCG, Bain, SEC filings, Gartner) over less reputable market research
-- Confidence heat-bar: Traffic-light score each data point:
-  * 🟢 Green = reported figure from reliable source
-  * 🟡 Amber = extrapolated from partial data / questionable source  
-  * 🔴 Red = assumption
-- Benchmark sanity checks: Ensure all figures reconcile (e.g., company revenue < TAM)
-
-APPROACH:
-- Think step-by-step before concluding
-- Highly structured, logical sections where all facts reconcile
-- Avoid fluff or buzzwords, focus on critical insights
-- Be concise and professional
-
-CRITICAL CITATION FORMAT:
-- After EVERY factual claim, you MUST add an inline numbered citation [N]
-- Use ONLY this format: [N] where N is the citation number
-- Example: "Market reached $4.2B in 2024 [1]. Solar adoption increased 300% [2][3]."
-- You can use multiple citations for a single claim: [1][2]
-- Include confidence indicators (🟢🟡🔴) where appropriate: "Revenue of $100M [1] 🟢"
-- Do NOT include URLs in the text - only the numbered citations
-- When you know the exact section or page, mention it inline before the citation (e.g., "Section 3, p.12 [4]")
-
-Available Sources (cite these by number):
-${researchState.findings
-  .filter((f) => f.source) // Skip findings without sources
-  .map((f) => {
-    const sourceKey = [f.source, f.section ?? '', f.page ?? '']
-      .filter(Boolean)
-      .join('#');
-    const citNum = citationMap.get(sourceKey);
-    const detailParts: string[] = [];
-    if (f.section) detailParts.push(`Section: ${f.section}`);
-    if (f.page) detailParts.push(`p. ${f.page}`);
-    const detailLine = detailParts.length ? ` | ${detailParts.join(' • ')}` : '';
-    try {
-      const url = new URL(f.source);
-      return `[${citNum}] ${url.hostname}${detailLine}\nFull URL: ${f.source}\nContent: ${f.text}\n`;
-    } catch {
-      return `[${citNum}] ${f.source}${detailLine}\nContent: ${f.text}\n`;
-    }
-  })
-  .join('\n')}
-
-CITATION RULES:
-1. Every factual claim needs [N] citation immediately after the claim
-2. Use only the number in brackets: [1], [2], [3], etc.
-3. The full source URLs will be shown in the References section automatically
-
-Previous Analysis Summaries:
-${researchState.summaries.join('\n\n')}
-
-Generate a COMMERCIAL DUE DILIGENCE REPORT following this structure:
-
-# ${topic}
-
-## 0. Front Matter
-- Research topic and scope [N]
-- Methodology: Sources used, data cutoff date [N]
-- Number of sources consulted: ${sources.length}
-
-### Citation System
-- Every claim must link to its exact source via inline [N]
-- Cite the precise section/page whenever provided in the source metadata
-- Maintain a running bibliography that mirrors the inline numbering
-- If a source spans multiple sections/pages, assign unique citation numbers so each chunk is traceable
-- When referencing paginated research/PDFs, include page indicators in prose (e.g., [4], p.12)
-
-## 1. Executive Summary (3-4 paragraphs)
-- Market snapshot: size, growth, profitability [N]
-- Key drivers: 2-3 headline catalysts [N]
-- Top investment theses [N]
-- Risks & red flags [N]
-
-## 2. Market 101
-### A. Problem Space & Workflow
-[Describe where pain exists and who experiences it [N]]
-
-### B. Value Chain & Revenue Pools
-[Map suppliers → products → end-users [N]]
-
-### C. Market Segmentation
-[Segment by vertical, customer size, geography [N]]
-
-### D. TAM/SAM/SOM Sizing
-[Triangulated market sizing with confidence indicators 🟢🟡🔴 [N]]
-
-### E. Growth Drivers & Inhibitors
-[Rank-ordered drivers with evidence [N]]
-
-### F. Unit Economics
-[Gross margins, retention, payback periods [N]]
-
-## 3. Competitive Landscape
-### A. Market Structure
-[Fragmentation vs concentration analysis [N]]
-
-### B. Top Vendors
-[Key players, market share, positioning [N]]
-
-### C. M&A Activity
-[Recent deals, multiples, trends [N]]
-
-### D. White Space Analysis
-[Unmet needs, opportunities [N]]
-
-## 4. Customer Voice
-[Decision-maker personas, buying criteria, pain points [N]]
-
-## 5. Investment Theses
-[3-5 specific theses with sizing of prize, PE value-add, and risks [N]]
-
-## 6. Target Universe (if applicable)
-[Potential acquisition targets or market participants [N]]
-
-## 7. Value Creation Playbook
-[100-day plan, tech modernization, GTM acceleration [N]]
-
-## 8. Risks & Sensitivities
-[Macro, technological, execution risks [N]]
-
-## 9. References & Bibliography
-${sources
-  .map(
-    (s) =>
-      `[${s.id}] ${s.title}${s.detail ? ` (${s.detail})` : ''} - ${s.url}`,
-  )
-  .join('\n')}
-
-CRITICAL REQUIREMENTS:
-- Every factual statement must have inline citation [N]  
-- Add confidence indicators (🟢🟡🔴) to quantitative claims
-- Ensure all figures reconcile and make sense together
-- Focus on actionable insights for PE investors
-- Be comprehensive, detailed, and professionally formatted`,
-                });
-
-                addActivity({
-                  type: 'synthesis',
-                  status: 'complete',
-                  message: 'Research report completed',
-                  timestamp: new Date().toISOString(),
-                  depth: researchState.currentDepth,
-                });
-
-                // Send the structured report with findings
-                dataStream.writeData({
-                  type: 'research-report',
-                  content: {
-                    report: finalReport.text,
-                    citations: sources,
-                    findings: researchState.findings,
-                    metadata: {
-                      topic,
-                      completedSteps: researchState.completedSteps,
-                      totalSteps: researchState.totalExpectedSteps,
-                      duration: Date.now() - startTime,
-                      sourcesCount: sources.length,
+                if (result.success && result.report) {
+                  // Send the final research report
+                  dataStream.writeData({
+                    type: 'research-report',
+                    content: {
+                      report: result.report,
+                      citations: result.citations || [],
+                      findings: result.findings || [],
+                      agentFlow: result.agentFlow || '',
+                      metadata: {
+                        topic,
+                        citationCount: result.citations?.length || 0,
+                      },
                     },
-                  },
-                });
+                  });
 
-                return {
-                  success: true,
-                  data: {
-                    findings: researchState.findings,
-                    analysis: finalReport.text,
-                    citations: sources,
-                    completedSteps: researchState.completedSteps,
-                    totalSteps: researchState.totalExpectedSteps,
-                  },
-                };
-              } catch (error: any) {
-                console.error('Deep research error:', error);
+                  return {
+                    success: true,
+                    data: {
+                      findings: result.findings || [],
+                      analysis: result.report,
+                      citations: result.citations || [],
+                      agentFlow: result.agentFlow,
+                    },
+                  };
+                }
 
-                addActivity({
-                  type: 'thought',
-                  status: 'error',
-                  message: `Research failed: ${error.message}`,
-                  timestamp: new Date().toISOString(),
-                  depth: researchState.currentDepth,
-                });
-
+                // Error case
                 return {
                   success: false,
-                  error: error.message,
-                  data: {
-                    findings: researchState.findings,
-                    completedSteps: researchState.completedSteps,
-                    totalSteps: researchState.totalExpectedSteps,
-                  },
+                  error: result.error || 'Research pipeline failed',
+                  agentFlow: result.agentFlow,
+                };
+
+              } catch (error: any) {
+                console.error('Deep research error:', error);
+                return {
+                  success: false,
+                  error: error.message || 'Deep research failed',
                 };
               }
             },

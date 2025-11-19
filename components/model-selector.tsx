@@ -30,9 +30,14 @@ export function ModelSelector({
     useOptimistic(selectedModelId);
 
   const selectedModel = useMemo(
-    () => models.find((model) => model.id === optimisticModelId),
-    [optimisticModelId],
+    () => models?.find((model) => model.id === optimisticModelId),
+    [optimisticModelId, models],
   );
+
+  // Safety check for undefined models
+  if (!models || models.length === 0) {
+    return null;
+  }
 
   return (
     <div className="flex flex-row gap-1">

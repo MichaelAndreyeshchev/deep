@@ -282,18 +282,23 @@ function PureMultimodalInput({
       <div className="absolute bottom-0 p-2 flex flex-row gap-2 justify-start items-center">
         <AttachmentsButton fileInputRef={fileInputRef} isLoading={isLoading} />
         <DocumentsButton isLoading={isLoading} />
-        <Tabs value={searchMode} onValueChange={(value) => {
-          setSearchMode(value as SearchMode);
-        }}>
+        {/* o3 Deep Research (Responses API) dialog */}
+        <O3DeepResearchButton initialQuery={input} isLoading={isLoading} />
+        <Tabs
+          value={searchMode}
+          onValueChange={(value) => {
+            setSearchMode(value as SearchMode);
+          }}
+        >
           <TabsList className="bg-transparent border rounded-full p-1 h-fit">
-            <TabsTrigger 
-              value="search" 
+            <TabsTrigger
+              value="search"
               className="rounded-full px-3 py-1.5 h-fit flex items-center gap-2 data-[state=inactive]:bg-transparent data-[state=active]:bg-orange-50 hover:bg-orange-50/50 data-[state=active]:text-orange-600 border-0 data-[state=active]:shadow-none transition-colors"
             >
               <Search size={14} />
               Search
             </TabsTrigger>
-            <TabsTrigger 
+            <TabsTrigger
               value="deep-research"
               className="rounded-full px-3 py-1.5 h-fit flex items-center gap-2 data-[state=inactive]:bg-transparent data-[state=active]:bg-orange-50 hover:bg-orange-50/50 data-[state=active]:text-orange-600 border-0 data-[state=active]:shadow-none transition-colors"
             >
@@ -406,6 +411,223 @@ const SendButton = memo(PureSendButton, (prevProps, nextProps) => {
   if (prevProps.input !== nextProps.input) return false;
   return true;
 });
+
+function PureO3DeepResearchButton({
+  initialQuery,
+  isLoading,
+}: {
+  initialQuery: string;
+  isLoading: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const [step, setStep] = useState<'initial' | 'clarify' | 'complete'>(
+    'initial',
+  );
+  const [query, setQuery] = useState(initialQuery);
+  const [questionsText, setQuestionsText] = useState('');
+  const [answers, setAnswers] = useState('');
+  const [report, setReport] = useState('');
+  const [citations, setCitations] = useState<
+    Array<{ index: number; title: string; url: string }>
+  >([]);
+  const [loading, setLoading] = useState(false);
+
+  const resetState = () => {
+    setStep('initial');
+    setQuestionsText('');
+    setAnswers('');
+    setReport('');
+    setCitations([]);
+  };
+
+  const handleRun = async () => {
+    if (!query.trim()) {
+      toast.error('Please enter a research question first.');
+      return;
+    }
+
+    try {
+      setLoading(true);
+
+      if (step === 'initial') {
+        const res = await fetch('/api/deep-research', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ query }),
+        });
+
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({}));
+          throw new Error(data.error || 'Deep research request failed');
+        }
+
+        const data = await res.json();
+        if (data.status === 'needs-clarification') {
+          setQuestionsText(data.questionsText || '');
+          setStep('clarify');
+        } else if (data.status === 'complete') {
+          setReport(data.report || '');
+          setCitations(data.citations || []);
+          setStep('complete');
+        } else {
+          throw new Error('Unexpected response from deep research API');
+        }
+      } else if (step === 'clarify') {
+        const clarifications = {
+          [questionsText || 'Questions']: answers || 'No additional details.',
+        };
+
+        const res = await fetch('/api/deep-research', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ query, clarifications }),
+        });
+
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({}));
+          throw new Error(data.error || 'Deep research request failed');
+        }
+
+        const data = await res.json();
+        if (data.status === 'complete') {
+          setReport(data.report || '');
+          setCitations(data.citations || []);
+          setStep('complete');
+        } else {
+          throw new Error('Unexpected response from deep research API');
+        }
+      }
+    } catch (error: any) {
+      console.error('o3 Deep Research error:', error);
+      toast.error(error?.message || 'Deep research failed');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Automatically trigger clarifying questions when dialog opens,
+  // so the user does not need to click a separate "Ask clarifying questions" step.
+  useEffect(() => {
+    if (open && step === 'initial' && query.trim() && !loading) {
+      // Fire and forget; errors are handled inside handleRun
+      void handleRun();
+    }
+  }, [open, step, query, loading]);
+
+  return (
+    <Dialog
+      open={open}
+      onOpenChange={(next) => {
+        setOpen(next);
+        if (!next) {
+          resetState();
+        } else {
+          setQuery(initialQuery);
+        }
+      }}
+    >
+      <DialogTrigger asChild>
+        <Button
+          className="rounded-md p-[7px] h-fit dark:border-zinc-700 hover:dark:bg-zinc-900 hover:bg-zinc-200"
+          disabled={isLoading}
+          variant="ghost"
+          title="Run deep research with o3 (Responses API)"
+        >
+          <Telescope size={14} />
+          <span className="ml-1 text-xs">o3</span>
+        </Button>
+      </DialogTrigger>
+      <DialogContent className="max-w-2xl max-h-[80vh] overflow-hidden flex flex-col">
+        <DialogHeader>
+          <DialogTitle>o3 Deep Research</DialogTitle>
+        </DialogHeader>
+        <div className="flex flex-col gap-3 overflow-y-auto">
+          <div className="flex flex-col gap-1">
+            <label className="text-xs font-medium text-muted-foreground">
+              Research question
+            </label>
+            <Textarea
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              rows={3}
+            />
+          </div>
+
+          {step === 'clarify' && (
+            <div className="flex flex-col gap-2">
+              <div className="text-xs font-medium text-muted-foreground">
+                Clarifying questions from o3
+              </div>
+              <div className="rounded-md border bg-muted p-2 text-xs whitespace-pre-wrap">
+                {questionsText}
+              </div>
+              <div className="flex flex-col gap-1">
+                <label className="text-xs font-medium text-muted-foreground">
+                  Your answers (free-form)
+                </label>
+                <Textarea
+                  value={answers}
+                  onChange={(e) => setAnswers(e.target.value)}
+                  rows={4}
+                  placeholder="Answer the questions above to guide the research..."
+                />
+              </div>
+            </div>
+          )}
+
+          {step === 'complete' && (
+            <div className="flex flex-col gap-2">
+              <div className="text-xs font-medium text-muted-foreground">
+                Research report
+              </div>
+              <div className="rounded-md border bg-muted p-2 text-xs whitespace-pre-wrap max-h-[40vh] overflow-y-auto">
+                {report}
+              </div>
+              {citations.length > 0 && (
+                <div className="flex flex-col gap-1">
+                  <div className="text-xs font-medium text-muted-foreground">
+                    Citations
+                  </div>
+                  <ul className="text-xs list-disc pl-4 space-y-1">
+                    {citations.map((c) => (
+                      <li key={c.index}>
+                        [{c.index}] {c.title} –{' '}
+                        <a
+                          href={c.url}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="underline"
+                        >
+                          {c.url}
+                        </a>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+        <div className="mt-3 flex justify-end gap-2">
+          <Button
+            variant="outline"
+            onClick={() => {
+              resetState();
+              setOpen(false);
+            }}
+          >
+            Close
+          </Button>
+          <Button onClick={handleRun} disabled={loading}>
+            {step === 'complete' ? 'Run again' : 'Run deep research'}
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+const O3DeepResearchButton = memo(PureO3DeepResearchButton);
 
 function PureDocumentsButton({
   isLoading,

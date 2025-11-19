@@ -182,7 +182,8 @@ const PurePreviewMessage = ({
             // Handle final result
             if (
               toolInvocation.state === 'result' &&
-              toolInvocation.result?.success
+              toolInvocation.result?.success &&
+              toolInvocation.result.data
             ) {
               const { completedSteps, totalSteps } = toolInvocation.result.data;
               if (completedSteps !== undefined && totalSteps !== undefined) {

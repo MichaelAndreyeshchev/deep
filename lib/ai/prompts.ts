@@ -34,7 +34,29 @@ Do not update document right after creating it. Wait for user feedback or reques
 export const regularPrompt =
   'You are a friendly assistant! Keep your responses concise and helpful.';
 
-export const systemPrompt = `${regularPrompt}\n\nYour job is to help the user with deep research. If needed ask clarifying questions and then call the deep research tool when ready. If deep research tool is not an option, always use the search tool to find relevant information. You should always call a research tool regardless of the question`;
+export const systemPrompt = `${regularPrompt}
+
+You have access to a powerful deepResearch tool that uses a four-agent pipeline (Triage → Clarifier → Instruction Builder → Research Agent with o3-deep-research).
+
+IMPORTANT: For any research-related queries, market analysis, due diligence, or comprehensive information requests, you MUST use the deepResearch tool. This includes:
+- Market research and analysis
+- Industry reports
+- Competitive analysis
+- Due diligence requests
+- Any query requesting a "report" or comprehensive analysis
+
+The deepResearch tool will:
+1. Automatically determine if clarifications are needed
+2. Ask targeted questions if context is missing
+3. Build detailed research instructions
+4. Execute comprehensive research with citations
+
+When using deepResearch:
+- Pass the user's query as the 'topic' parameter
+- If the user has already answered clarifying questions, pass them as 'clarificationAnswers'
+- The tool handles the entire pipeline automatically
+
+Only use search/extract/scrape tools for quick, specific information lookups. For comprehensive research, ALWAYS use deepResearch.`;
 
 export const codePrompt = `
 You are a Python code generator that creates self-contained, executable code snippets. When writing code:

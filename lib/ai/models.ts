@@ -24,6 +24,12 @@ export const models: Array<Model> = [
 
 export const reasoningModels: Array<Model> = [
   {
+    id: 'o3-deep-research',
+    label: 'o3 Deep Research',
+    apiIdentifier: 'o3-deep-research',
+    description: 'Optimized for in-depth synthesis and higher-quality research output with citations',
+  },
+  {
     id: 'o1',
     label: 'o1',
     apiIdentifier: 'o1',
@@ -44,4 +50,4 @@ export const reasoningModels: Array<Model> = [
 ] as const;
 
 export const DEFAULT_MODEL_NAME: string = 'gpt-4o';
-export const DEFAULT_REASONING_MODEL_NAME: string = 'o1';
+export const DEFAULT_REASONING_MODEL_NAME: string = 'o1'; // Changed from o3-deep-research - that model requires Responses API

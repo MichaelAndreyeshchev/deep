@@ -8,7 +8,9 @@ import { customMiddleware } from "./custom-middleware";
 type ReasoningModel = typeof VALID_REASONING_MODELS[number];
 
 // Valid reasoning models that can be used for research analysis and structured outputs
+// o3-deep-research is optimized for in-depth synthesis and higher-quality research output with citations
 const VALID_REASONING_MODELS = [
+  'o3-deep-research',
   'o1', 'o1-mini', 'o3-mini',
   'deepseek-ai/DeepSeek-R1',
   'gpt-4o'
@@ -22,8 +24,12 @@ export const supportsJsonOutput = (modelId: string) =>
   JSON_SUPPORTED_MODELS.includes(modelId as typeof JSON_SUPPORTED_MODELS[number]);
 
 // Get reasoning model from env, with JSON support info
-const REASONING_MODEL = process.env.REASONING_MODEL || 'o1-mini';
-const BYPASS_JSON_VALIDATION = process.env.BYPASS_JSON_VALIDATION === 'true';
+// Default to o3-deep-research for best research quality with citations
+const REASONING_MODEL = typeof process !== 'undefined' && process.env?.REASONING_MODEL 
+  ? process.env.REASONING_MODEL 
+  : 'o1'; // Changed from o3-deep-research - works with existing Chat Completions API
+
+const BYPASS_JSON_VALIDATION = typeof process !== 'undefined' && process.env?.BYPASS_JSON_VALIDATION === 'true';
 
 // Helper to get the reasoning model based on user's selected model
 function getReasoningModel(modelId: string) {
@@ -35,7 +41,7 @@ function getReasoningModel(modelId: string) {
   const configuredModel = REASONING_MODEL;
 
   if (!VALID_REASONING_MODELS.includes(configuredModel as ReasoningModel)) {
-    const fallback = 'o1-mini';
+    const fallback = 'o1'; // Works with Chat Completions API
     console.warn(`Invalid REASONING_MODEL "${configuredModel}", falling back to ${fallback}`);
     return fallback;
   }
@@ -50,7 +56,9 @@ function getReasoningModel(modelId: string) {
 
 export const customModel = (apiIdentifier: string, forReasoning: boolean = false) => {
   // Check which API key is available
-  const hasOpenRouterKey = process.env.OPENROUTER_API_KEY && process.env.OPENROUTER_API_KEY !== "****";
+  const hasOpenRouterKey = typeof process !== 'undefined' && 
+    process.env?.OPENROUTER_API_KEY && 
+    process.env.OPENROUTER_API_KEY !== "****";
 
   // If it's for reasoning, get the appropriate reasoning model
   const modelId = forReasoning ? getReasoningModel(apiIdentifier) : apiIdentifier;
