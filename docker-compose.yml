@@ -14,6 +14,24 @@ x-minio-config: &minio-config
   BLOB_READ_WRITE_TOKEN: minioadmin
 
 services:
+  # Python Deep Research Service
+  deep-research-service:
+    build:
+      context: ./services/py-deep-research
+      dockerfile: Dockerfile
+    ports:
+      - "8001:8001"
+    environment:
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - SEARCH_PROVIDER=openai
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8001/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
   app:
     build: .
     ports:
@@ -26,11 +44,14 @@ services:
       NEXTAUTH_SECRET: ${AUTH_SECRET}
       # Required for Docker setup
       NEXTAUTH_URL_INTERNAL: http://app:3000
+      PYTHON_SERVICE_URL: http://deep-research-service:8001
       NODE_ENV: development
     volumes:
       # Mount uploads directory so files persist
       - uploads_data:/app/public/uploads
     depends_on:
+      deep-research-service:
+        condition: service_healthy
       postgres:
         condition: service_healthy
       redis:
