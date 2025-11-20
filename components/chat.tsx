@@ -34,6 +34,7 @@ export function Chat({
 }) {
   const { mutate } = useSWRConfig();
   const [searchMode, setSearchMode] = useState<'search' | 'deep-research'>('search');
+  const [researchMode, setResearchMode] = useState<'iterative' | 'deep'>('iterative');
 
   const {
     messages,
@@ -47,7 +48,13 @@ export function Chat({
     reload,
   } = useChat({
     id,
-    body: { id, modelId: selectedModelId, reasoningModelId: selectedReasoningModelId, experimental_deepResearch: searchMode === 'deep-research' },
+    body: { 
+      id, 
+      modelId: selectedModelId, 
+      reasoningModelId: selectedReasoningModelId, 
+      experimental_deepResearch: searchMode === 'deep-research',
+      researchMode: researchMode,
+    },
     initialMessages,
     experimental_throttle: 100,
     onFinish: () => {
@@ -123,6 +130,8 @@ export function Chat({
               append={append}
               searchMode={searchMode}
               setSearchMode={handleSearchModeChange}
+              researchMode={researchMode}
+              setResearchMode={setResearchMode}
             />
           )}
         </form>
