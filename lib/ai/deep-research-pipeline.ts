@@ -1,17 +1,10 @@
-/**
- * Deep Research Pipeline Implementation
- * Handles the execution of the four-agent research workflow
- */
 
-import { generateText } from 'ai';
-import { customModel } from '@/lib/ai';
+import OpenAI from 'openai';
 import {
   AgentEventTracker,
   triageQuery,
   generateClarifyingQuestions,
   buildResearchInstructions,
-  RESEARCH_AGENT_SYSTEM_PROMPT,
-  parseClarificationAnswers,
 } from './agents';
 
 export interface ResearchPipelineOptions {
@@ -164,7 +157,7 @@ export async function executeResearchPipeline(
       type: 'handoff',
       content: {
         to: 'Research Agent',
-        instructions: researchInstructions.substring(0, 200) + '...',
+        instructions: `${researchInstructions.substring(0, 200)}...`,
       },
     });
 
@@ -176,7 +169,7 @@ export async function executeResearchPipeline(
       depth: 0,
     });
 
-    // Step 4: Research Agent (o3-deep-research via API)
+    // Step 4: Research Agent (o3-deep-research via direct OpenAI API)
     onActivity({
       type: 'reasoning',
       status: 'pending',
@@ -205,44 +198,101 @@ export async function executeResearchPipeline(
       });
     }
 
-    // Check if running on server or client
-    const baseUrl = typeof window === 'undefined' 
-      ? `http://localhost:${process.env.PORT || 3000}`
-      : '';
-      
-    // Call the o3-deep-research API endpoint
-    const deepResearchResponse = await fetch(`${baseUrl}/api/deep-research`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        query: researchInstructions,
-        // Skip clarifications since we already handled them
-        clarifications: { 'Already handled': 'Research instructions include all context' },
-      }),
-    });
-
-    if (!deepResearchResponse.ok) {
-      throw new Error(`Deep research API error: ${deepResearchResponse.statusText}`);
+    // Initialize OpenAI client
+    if (!process.env.OPENAI_API_KEY) {
+      throw new Error('OPENAI_API_KEY is not configured');
     }
 
-    const deepResearchResult = await deepResearchResponse.json();
+    const openai = new OpenAI({
+      apiKey: process.env.OPENAI_API_KEY,
+    });
 
-    if (deepResearchResult.status !== 'complete') {
-      throw new Error('Unexpected deep research response status');
+    const SYSTEM_MESSAGE_O3 = `
+You are a professional researcher preparing a structured, data-driven report on behalf of an investment and strategy team.
+
+Do:
+- Focus on data-rich insights: include specific figures, trends, statistics, and measurable outcomes.
+- When appropriate, summarize data in a way that could be turned into charts or tables.
+- Prioritize reliable, up-to-date sources: regulators, industry reports, filings, and reputable news.
+- Include inline citations and return all source metadata.
+
+Be analytical, avoid generalities, and ensure that each section supports data-backed reasoning that could inform investment decisions and commercial strategy.
+`;
+
+    const deepResponse = await openai.responses.create({
+      model: 'o3-deep-research-2025-06-26',
+      input: [
+        {
+          role: 'developer',
+          content: [
+            {
+              type: 'input_text',
+              text: SYSTEM_MESSAGE_O3,
+            },
+          ],
+        },
+        {
+          role: 'user',
+          content: [
+            {
+              type: 'input_text',
+              text: researchInstructions,
+            },
+          ],
+        },
+      ],
+      reasoning: {
+        summary: 'auto',
+      },
+      tools: [
+        {
+          type: 'web_search_preview',
+        },
+      ],
+    });
+
+    const last = deepResponse?.output?.[deepResponse.output.length - 1];
+    let report = '';
+    const citations: Array<{
+      index: number;
+      title: string;
+      url: string;
+      start_index: number;
+      end_index: number;
+    }> = [];
+
+    if (last?.type === 'message') {
+      const content = (last as any).content?.[0];
+      if (content?.type === 'output_text') {
+        report = content.text || '';
+        const annotations = content.annotations || [];
+        let idx = 1;
+        for (const ann of annotations) {
+          if (ann.type === 'url_citation') {
+            citations.push({
+              index: idx++,
+              title: ann.title,
+              url: ann.url,
+              start_index: ann.start_index,
+              end_index: ann.end_index,
+            });
+          }
+        }
+      }
     }
 
     eventTracker.addEvent({
       agentName: 'Research Agent (o3-deep-research)',
       type: 'message_output',
       content: {
-        reportLength: deepResearchResult.report?.length || 0,
-        citationCount: deepResearchResult.citations?.length || 0,
+        reportLength: report?.length || 0,
+        citationCount: citations?.length || 0,
       },
     });
 
     // Process citations and sources
-    if (deepResearchResult.citations && Array.isArray(deepResearchResult.citations)) {
-      for (const citation of deepResearchResult.citations) {
+    if (citations && Array.isArray(citations)) {
+      for (const citation of citations) {
         onSource({
           url: citation.url,
           title: citation.title,
@@ -254,13 +304,13 @@ export async function executeResearchPipeline(
     onActivity({
       type: 'synthesis',
       status: 'complete',
-      message: `🔍 Research complete with ${deepResearchResult.citations?.length || 0} citations`,
+      message: `🔍 Research complete with ${citations?.length || 0} citations`,
       timestamp: new Date().toISOString(),
       depth: 1,
     });
 
     // Transform findings to match expected format
-    const findings = deepResearchResult.citations?.map((citation: any, idx: number) => ({
+    const findings = citations?.map((citation: any, idx: number) => ({
       statement: `Reference [${citation.index}]`,
       source: citation.url,
       confidence: 'high',
@@ -269,8 +319,8 @@ export async function executeResearchPipeline(
 
     return {
       success: true,
-      report: deepResearchResult.report,
-      citations: deepResearchResult.citations,
+      report: report,
+      citations: citations,
       findings,
       agentFlow: eventTracker.getAgentFlow(),
     };
