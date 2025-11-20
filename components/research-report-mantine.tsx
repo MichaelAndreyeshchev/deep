@@ -34,6 +34,19 @@ import {
 import { notifications } from '@mantine/notifications';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import { 
+  PieChart, 
+  Pie, 
+  Cell, 
+  BarChart, 
+  Bar, 
+  XAxis, 
+  YAxis, 
+  CartesianGrid, 
+  Tooltip as RechartsTooltip, 
+  Legend, 
+  ResponsiveContainer 
+} from 'recharts';
 
 interface Citation {
   id: number;
@@ -136,43 +149,53 @@ const VisualizationPanel = ({ findings = [] }: { findings?: Finding[] }) => {
     );
   }
 
+  const confidenceChartData = [
+    { name: 'High', value: confidenceTotals.high, color: '#22c55e' },
+    { name: 'Medium', value: confidenceTotals.medium, color: '#facc15' },
+    { name: 'Low', value: confidenceTotals.low, color: '#fb7185' },
+  ].filter(item => item.value > 0);
+
+  const metricChartData = metricFindings.slice(0, 8).map((finding) => ({
+    name: finding.metricLabel || 'Unknown',
+    value: finding.metricValue || 0,
+    unit: finding.unit || '',
+    fullLabel: finding.metricLabel,
+  }));
+
   return (
     <Stack gap="lg">
       {hasConfidenceData && (
         <div>
           <Group justify="space-between" mb="xs">
             <Text fw={600} size="sm">
-              Confidence Mix
+              Confidence Distribution
             </Text>
             <Text size="xs" c="dimmed">
               Based on {totalConfidence} cited findings
             </Text>
           </Group>
-          <div className="grid grid-cols-3 gap-2">
-            {(Object.keys(confidenceTotals) as Array<
-              keyof typeof confidenceTotals
-            >).map((key) => {
-              const count = confidenceTotals[key];
-              const pct = totalConfidence
-                ? Math.round((count / totalConfidence) * 100)
-                : 0;
-              const meta = confidenceMeta[key];
-              return (
-                <div
-                  key={key}
-                  className="rounded-lg border border-[var(--color-scrollbar)]/60 bg-[var(--color-chat-bar)]/60 p-3 text-center shadow-sm"
-                >
-                  <div className="text-lg">{meta.emoji}</div>
-                  <Text size="xs" fw={600} c="dimmed">
-                    {meta.label}
-                  </Text>
-                  <Text fw={700} size="lg" c="var(--color-text)">
-                    {pct}%
-                  </Text>
-                </div>
-              );
-            })}
-          </div>
+          <ResponsiveContainer width="100%" height={250}>
+            <PieChart>
+              <Pie
+                data={confidenceChartData}
+                cx="50%"
+                cy="50%"
+                labelLine={false}
+                label={({ name, percent }) => `${name}: ${(percent * 100).toFixed(0)}%`}
+                outerRadius={80}
+                fill="#8884d8"
+                dataKey="value"
+              >
+                {confidenceChartData.map((entry) => (
+                  <Cell key={entry.name} fill={entry.color} />
+                ))}
+              </Pie>
+              <RechartsTooltip 
+                formatter={(value: any) => [`${value} findings`, 'Count']}
+              />
+              <Legend />
+            </PieChart>
+          </ResponsiveContainer>
         </div>
       )}
 
@@ -183,44 +206,53 @@ const VisualizationPanel = ({ findings = [] }: { findings?: Finding[] }) => {
               Metric Highlights
             </Text>
             <Text size="xs" c="dimmed">
-              Normalized to the largest reported figure
+              Top {metricChartData.length} metrics from research
             </Text>
           </Group>
-          <Stack gap="sm">
-            {metricFindings.slice(0, 6).map((finding, idx) => {
-              const widthPercent = finding.metricValue
-                ? Math.min((finding.metricValue / maxMetricValue) * 100, 100)
-                : 0;
-              return (
-                <div key={`${finding.metricLabel}-${idx}`}>
-                  <div className="flex items-center justify-between text-xs text-muted-foreground">
-                    <span>{finding.metricLabel}</span>
-                    <span>
-                      {finding.metricValue
-                        ? formatMetricValue(
-                            finding.metricValue,
-                            finding.unit,
-                          )
-                        : 'n/a'}
-                    </span>
-                  </div>
-                  <div className="mt-1 h-3 w-full overflow-hidden rounded-full bg-[var(--color-scrollbar)]/40">
-                    <div
-                      className="h-full rounded-full bg-gradient-to-r from-[#7c3aed] via-[#c026d3] to-[#fbbf24] shadow-[0_0_10px_rgba(124,58,237,0.5)] transition-[width] duration-500"
-                      style={{ width: `${widthPercent || 5}%` }}
-                    />
-                  </div>
-                  {(finding.section || finding.page) && (
-                    <Text size="xs" c="dimmed" mt={4}>
-                      {(finding.section && `Section: ${finding.section}`) || ''}
-                      {finding.section && finding.page ? ' · ' : ''}
-                      {finding.page && `p. ${finding.page}`}
-                    </Text>
-                  )}
-                </div>
-              );
-            })}
-          </Stack>
+          <ResponsiveContainer width="100%" height={300}>
+            <BarChart
+              data={metricChartData}
+              margin={{ top: 20, right: 30, left: 20, bottom: 60 }}
+            >
+              <CartesianGrid strokeDasharray="3 3" />
+              <XAxis 
+                dataKey="name" 
+                angle={-45}
+                textAnchor="end"
+                height={80}
+                interval={0}
+                tick={{ fontSize: 11 }}
+              />
+              <YAxis 
+                tick={{ fontSize: 11 }}
+                tickFormatter={(value) => {
+                  if (value >= 1_000_000_000) return `${(value / 1_000_000_000).toFixed(1)}B`;
+                  if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}M`;
+                  if (value >= 1_000) return `${(value / 1_000).toFixed(1)}K`;
+                  return value.toString();
+                }}
+              />
+              <RechartsTooltip 
+                formatter={(value: any, name: any, props: any) => {
+                  const unit = props.payload.unit;
+                  return [formatMetricValue(value, unit), 'Value'];
+                }}
+                labelFormatter={(label) => `Metric: ${label}`}
+              />
+              <Legend />
+              <Bar 
+                dataKey="value" 
+                fill="url(#colorGradient)" 
+                name="Metric Value"
+              />
+              <defs>
+                <linearGradient id="colorGradient" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%" stopColor="#7c3aed" stopOpacity={0.8}/>
+                  <stop offset="95%" stopColor="#c026d3" stopOpacity={0.8}/>
+                </linearGradient>
+              </defs>
+            </BarChart>
+          </ResponsiveContainer>
         </div>
       )}
     </Stack>
@@ -272,7 +304,7 @@ export function ResearchReportMantine({
       const maxWidth = pageWidth - 2 * margin;
       let y = margin;
 
-      const addText = (text: string, fontSize: number = 11, isBold: boolean = false, color: number[] = [0, 0, 0]) => {
+      const addText = (text: string, fontSize = 11, isBold = false, color: number[] = [0, 0, 0]) => {
         pdf.setFontSize(fontSize);
         pdf.setFont('helvetica', isBold ? 'bold' : 'normal');
         pdf.setTextColor(color[0], color[1], color[2]);
@@ -562,7 +594,7 @@ steps: ${metadata.completedSteps}/${metadata.totalSteps}
                 return parts.map((part, idx) => {
                   const match = part.match(/^\[(\d+)\]$/);
                   if (match) {
-                    const citationId = parseInt(match[1]);
+                    const citationId = Number.parseInt(match[1]);
                     const citation = citationMap.get(citationId);
                     if (citation) {
                       return (
