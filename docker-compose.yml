@@ -5,8 +5,8 @@ x-postgres-config: &postgres-config
   POSTGRES_URL: postgresql://postgres:postgres@postgres:5432/open_deep_research
 
 x-redis-config: &redis-config
-  UPSTASH_REDIS_REST_URL: http://redis:6379
-  UPSTASH_REDIS_REST_TOKEN: local_development_token
+  # Use actual Redis container
+  REDIS_URL: redis://redis:6379
 
 x-minio-config: &minio-config
   MINIO_ROOT_USER: minioadmin
@@ -42,6 +42,7 @@ services:
       <<: [*postgres-config, *redis-config, *minio-config]
       NEXTAUTH_URL: http://localhost:13000
       NEXTAUTH_SECRET: ${AUTH_SECRET}
+      AUTH_TRUST_HOST: true
       # Required for Docker setup
       NEXTAUTH_URL_INTERNAL: http://app:3000
       PYTHON_SERVICE_URL: http://deep-research-service:8001

@@ -36,13 +36,41 @@ class LocalRedisWrapper {
   }
 
   async evalsha(sha: string, keys: string[], args: string[]) {
-    // Mock evalsha for rate limiting - return success
-    return ['allowed', 1, -1, -1, -1];
+    // Mock evalsha for rate limiting with actual enforcement
+    return this.executeRateLimitScript(keys, args);
   }
 
   async eval(script: string, keys: string[], args: string[]) {
-    // Mock eval for rate limiting - return success
-    return ['allowed', 1, -1, -1, -1];
+    // Mock eval for rate limiting with actual enforcement
+    return this.executeRateLimitScript(keys, args);
+  }
+
+  private rateLimitData = new Map<string, { count: number; resetAt: number }>();
+
+  private executeRateLimitScript(keys: string[], args: string[]) {
+    const key = keys[0];
+    const limit = parseInt(args[0]);
+    const window = parseInt(args[1]);
+    const now = Date.now();
+
+    let data = this.rateLimitData.get(key);
+    
+    if (!data || data.resetAt < now) {
+      // Reset window
+      data = { count: 1, resetAt: now + window };
+      this.rateLimitData.set(key, data);
+      return ['allowed', 1, limit - 1, -1, data.resetAt];
+    }
+
+    if (data.count >= limit) {
+      // Rate limit exceeded
+      return ['denied', data.count, 0, -1, data.resetAt];
+    }
+
+    // Increment and allow
+    data.count++;
+    this.rateLimitData.set(key, data);
+    return ['allowed', data.count, limit - data.count, -1, data.resetAt];
   }
 
   async scriptLoad(script: string) {
@@ -112,19 +140,20 @@ class LocalRedisWrapper {
   }
 }
 
-// Check if we're using real Upstash Redis or local development
+// Check if we have Upstash credentials configured
 function isUpstashConfigured() {
   const url = process.env.UPSTASH_REDIS_REST_URL || '';
   const token = process.env.UPSTASH_REDIS_REST_TOKEN || '';
   
-  // Check if it's a real Upstash URL (contains upstash.io)
-  return url.includes('upstash.io') && token.length > 20;
+  // Check if we have valid Upstash credentials
+  return url.length > 0 && token.length > 0;
 }
 
 // Create the appropriate Redis client
 export const createRedisClient = () => {
   if (isUpstashConfigured()) {
-    // Use real Upstash Redis
+    // Use Upstash Redis (either real Upstash or local Redis via Upstash HTTP proxy)
+    console.log('Using Upstash Redis client');
     return new Redis({
       url: process.env.UPSTASH_REDIS_REST_URL!,
       token: process.env.UPSTASH_REDIS_REST_TOKEN!,

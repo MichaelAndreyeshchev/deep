@@ -1,14 +1,18 @@
-import { Redis } from '@upstash/redis';
-import { Ratelimit } from '@upstash/ratelimit';
-import { createRedisClient } from './redis-wrapper';
+// Import the Redis-based rate limiter
+import { rateLimiter as redisRateLimiter } from './redis-rate-limit';
 
-// Create a new Redis instance with wrapper for local development
-export const redis = createRedisClient();
+// Create a wrapper that matches the Upstash interface
+export const rateLimiter = {
+  limit: async (identifier: string) => {
+    const result = await redisRateLimiter.checkLimit(identifier);
+    return {
+      success: result.success,
+      limit: result.limit,
+      remaining: result.remaining,
+      reset: result.reset,
+    };
+  },
+};
 
-// Create a new rate limiter that allows 5 requests per 60 seconds
-export const rateLimiter = new Ratelimit({
-  redis,
-  limiter: Ratelimit.slidingWindow(5, '60 s'),
-  analytics: true,
-  prefix: '@upstash/ratelimit',
-});
+// Export the Redis client
+export { redis } from './redis-client';
