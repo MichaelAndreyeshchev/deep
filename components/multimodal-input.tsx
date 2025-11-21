@@ -33,6 +33,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { DocumentManager } from './document-manager';
 
 type SearchMode = 'search' | 'deep-research';
+type ResearchMode = 'iterative' | 'deep';
 
 function PureMultimodalInput({
   chatId,
@@ -49,6 +50,8 @@ function PureMultimodalInput({
   className,
   searchMode,
   setSearchMode,
+  researchMode,
+  setResearchMode,
 }: {
   chatId: string;
   input: string;
@@ -72,6 +75,8 @@ function PureMultimodalInput({
   className?: string;
   searchMode: SearchMode;
   setSearchMode: (mode: SearchMode) => void;
+  researchMode?: ResearchMode;
+  setResearchMode?: (mode: ResearchMode) => void;
 }) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const { width } = useWindowSize();
@@ -307,6 +312,31 @@ function PureMultimodalInput({
             </TabsTrigger>
           </TabsList>
         </Tabs>
+        {searchMode === 'deep-research' && researchMode && setResearchMode && (
+          <Tabs
+            value={researchMode}
+            onValueChange={(value) => {
+              setResearchMode(value as ResearchMode);
+            }}
+          >
+            <TabsList className="bg-transparent border rounded-full p-1 h-fit">
+              <TabsTrigger
+                value="iterative"
+                className="rounded-full px-3 py-1.5 h-fit flex items-center gap-2 data-[state=inactive]:bg-transparent data-[state=active]:bg-blue-50 hover:bg-blue-50/50 data-[state=active]:text-blue-600 border-0 data-[state=active]:shadow-none transition-colors"
+                title="Faster research with 5-page reports"
+              >
+                Iterative
+              </TabsTrigger>
+              <TabsTrigger
+                value="deep"
+                className="rounded-full px-3 py-1.5 h-fit flex items-center gap-2 data-[state=inactive]:bg-transparent data-[state=active]:bg-blue-50 hover:bg-blue-50/50 data-[state=active]:text-blue-600 border-0 data-[state=active]:shadow-none transition-colors"
+                title="Thorough research with 20+ page reports"
+              >
+                Deep
+              </TabsTrigger>
+            </TabsList>
+          </Tabs>
+        )}
       </div>
 
       <div className="absolute bottom-0 right-0 p-2 w-fit flex flex-row justify-end">

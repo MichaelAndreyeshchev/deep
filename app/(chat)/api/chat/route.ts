@@ -38,6 +38,7 @@ import {
 import { generateTitleFromUserMessage } from '../../actions';
 import OpenAI from 'openai';
 import { runAgentPipeline } from '@/lib/ai/deep-research-pipeline';
+import { startResearch, checkServiceHealth, type ResearchMode } from '@/lib/ai/python-research-client';
 
 type AllowedTools =
   | 'deepResearch'
@@ -691,90 +692,179 @@ Return your clarifying questions in a clear, numbered format.`;
           },
           deepResearch: {
             description:
-              'Perform deep research using the four-agent pipeline: Triage → Clarifier/Instruction → Research. This automatically handles clarifications and research planning. Use this for any comprehensive research, market analysis, or report generation.',
+              'Perform deep research using qx-labs multi-agent system. Supports two modes: "iterative" (faster, 5 pages) or "deep" (thorough, 20+ pages). Use this for any comprehensive research, market analysis, or report generation.',
             parameters: z.object({
               topic: z.string().describe('The topic or question to research'),
+              mode: z.enum(['iterative', 'deep']).optional().describe('Research mode: "iterative" for faster 5-page reports, "deep" for thorough 20+ page reports. Default: iterative'),
               clarificationAnswers: z.record(z.string()).optional().describe('Answers to clarification questions if already collected'),
             }),
-            execute: async ({ topic, clarificationAnswers }) => {
+            execute: async ({ topic, mode = 'iterative', clarificationAnswers }) => {
               try {
-                // Use the four-agent pipeline
-                const result = await runAgentPipeline(
-                  topic,
-                  clarificationAnswers,
-                  model.apiIdentifier,
-                  reasoningModel.apiIdentifier,
-                  {
-                    onActivity: (activity) => {
-                      dataStream.writeData({
-                        type: 'activity-delta',
-                        content: activity,
-                      });
-                    },
-                    onSource: (source) => {
-                      dataStream.writeData({
-                        type: 'source-delta',
-                        content: source,
-                      });
-                    },
-                    onProgress: (progress) => {
-                      dataStream.writeData(progress);
-                    },
-                    dataStream,
-                  }
-                );
-
-                if (result.needsClarification) {
-                  // Return clarification questions
+                // Check if Python service is available
+                const pythonServiceAvailable = await checkServiceHealth();
+                
+                if (pythonServiceAvailable) {
+                  // Use the new Python-based qx-labs research system
                   dataStream.writeData({
-                    type: 'clarification-needed',
-                    content: {
-                      questions: result.clarificationQuestions || [],
-                      agentFlow: result.agentFlow || '',
-                    },
+                    type: 'activity-delta',
+                    content: `Starting ${mode} research using qx-labs multi-agent system...`,
                   });
 
-                  return {
-                    success: true,
-                    needsClarification: true,
-                    questions: result.clarificationQuestions,
-                    message: 'Please answer these clarifying questions to proceed with the research.',
-                  };
-                }
-
-                if (result.success && result.report) {
-                  // Send the final research report
-                  dataStream.writeData({
-                    type: 'research-report',
-                    content: {
-                      report: result.report,
-                      citations: result.citations || [],
-                      findings: result.findings || [],
-                      agentFlow: result.agentFlow || '',
-                      metadata: {
-                        topic,
-                        citationCount: result.citations?.length || 0,
+                  const result = await startResearch(
+                    {
+                      query: topic,
+                      mode: mode as ResearchMode,
+                      max_iterations: mode === 'deep' ? 5 : 3,
+                      max_time_minutes: mode === 'deep' ? 15 : 10,
+                      output_length: mode === 'iterative' ? '5 pages' : '',
+                      background_context: clarificationAnswers 
+                        ? Object.entries(clarificationAnswers).map(([q, a]) => `${q}: ${a}`).join('\n')
+                        : '',
+                    },
+                    {
+                      onActivity: (activity) => {
+                        dataStream.writeData({
+                          type: 'activity-delta',
+                          content: activity,
+                        });
                       },
-                    },
+                      onSource: (source) => {
+                        dataStream.writeData({
+                          type: 'source-delta',
+                          content: source,
+                        });
+                      },
+                      onCitation: (citation) => {
+                        dataStream.writeData({
+                          type: 'source-delta',
+                          content: citation,
+                        });
+                      },
+                      onFinding: (finding) => {
+                        dataStream.writeData({
+                          type: 'activity-delta',
+                          content: 'New findings discovered',
+                        });
+                      },
+                      dataStream,
+                    }
+                  );
+
+                  if (result.success && result.report) {
+                    // Send the final research report
+                    dataStream.writeData({
+                      type: 'research-report',
+                      content: {
+                        report: result.report,
+                        citations: result.citations || [],
+                        findings: result.findings || [],
+                        metadata: {
+                          topic,
+                          mode,
+                          citationCount: result.citations?.length || 0,
+                        },
+                      },
+                    });
+
+                    return {
+                      success: true,
+                      data: {
+                        findings: result.findings || [],
+                        analysis: result.report,
+                        citations: result.citations || [],
+                        mode,
+                      },
+                    };
+                  }
+
+                  // Error case
+                  return {
+                    success: false,
+                    error: result.error || 'Research failed',
+                  };
+                  
+                } else {
+                  // Fallback to the original pipeline if Python service is not available
+                  console.warn('Python service not available, falling back to original pipeline');
+                  dataStream.writeData({
+                    type: 'activity-delta',
+                    content: 'Using fallback research pipeline...',
                   });
 
+                  const result = await runAgentPipeline(
+                    topic,
+                    clarificationAnswers,
+                    model.apiIdentifier,
+                    reasoningModel.apiIdentifier,
+                    {
+                      onActivity: (activity) => {
+                        dataStream.writeData({
+                          type: 'activity-delta',
+                          content: activity,
+                        });
+                      },
+                      onSource: (source) => {
+                        dataStream.writeData({
+                          type: 'source-delta',
+                          content: source,
+                        });
+                      },
+                      onProgress: (progress) => {
+                        dataStream.writeData(progress);
+                      },
+                      dataStream,
+                    }
+                  );
+
+                  if (result.needsClarification) {
+                    dataStream.writeData({
+                      type: 'clarification-needed',
+                      content: {
+                        questions: result.clarificationQuestions || [],
+                        agentFlow: result.agentFlow || '',
+                      },
+                    });
+
+                    return {
+                      success: true,
+                      needsClarification: true,
+                      questions: result.clarificationQuestions,
+                      message: 'Please answer these clarifying questions to proceed with the research.',
+                    };
+                  }
+
+                  if (result.success && result.report) {
+                    dataStream.writeData({
+                      type: 'research-report',
+                      content: {
+                        report: result.report,
+                        citations: result.citations || [],
+                        findings: result.findings || [],
+                        agentFlow: result.agentFlow || '',
+                        metadata: {
+                          topic,
+                          citationCount: result.citations?.length || 0,
+                        },
+                      },
+                    });
+
+                    return {
+                      success: true,
+                      data: {
+                        findings: result.findings || [],
+                        analysis: result.report,
+                        citations: result.citations || [],
+                        agentFlow: result.agentFlow,
+                      },
+                    };
+                  }
+
                   return {
-                    success: true,
-                    data: {
-                      findings: result.findings || [],
-                      analysis: result.report,
-                      citations: result.citations || [],
-                      agentFlow: result.agentFlow,
-                    },
+                    success: false,
+                    error: result.error || 'Research pipeline failed',
+                    agentFlow: result.agentFlow,
                   };
                 }
-
-                // Error case
-                return {
-                  success: false,
-                  error: result.error || 'Research pipeline failed',
-                  agentFlow: result.agentFlow,
-                };
 
               } catch (error: any) {
                 console.error('Deep research error:', error);

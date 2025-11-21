@@ -5,8 +5,8 @@ x-postgres-config: &postgres-config
   POSTGRES_URL: postgresql://postgres:postgres@postgres:5432/open_deep_research
 
 x-redis-config: &redis-config
-  UPSTASH_REDIS_REST_URL: http://redis:6379
-  UPSTASH_REDIS_REST_TOKEN: local_development_token
+  # Use actual Redis container
+  REDIS_URL: redis://redis:6379
 
 x-minio-config: &minio-config
   MINIO_ROOT_USER: minioadmin
@@ -14,6 +14,24 @@ x-minio-config: &minio-config
   BLOB_READ_WRITE_TOKEN: minioadmin
 
 services:
+  # Python Deep Research Service
+  deep-research-service:
+    build:
+      context: ./services/py-deep-research
+      dockerfile: Dockerfile
+    ports:
+      - "8001:8001"
+    environment:
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - SEARCH_PROVIDER=openai
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8001/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
   app:
     build: .
     ports:
@@ -24,13 +42,17 @@ services:
       <<: [*postgres-config, *redis-config, *minio-config]
       NEXTAUTH_URL: http://localhost:13000
       NEXTAUTH_SECRET: ${AUTH_SECRET}
+      AUTH_TRUST_HOST: true
       # Required for Docker setup
       NEXTAUTH_URL_INTERNAL: http://app:3000
-      NODE_ENV: development
+      PYTHON_SERVICE_URL: http://deep-research-service:8001
+      NODE_ENV: production
     volumes:
       # Mount uploads directory so files persist
       - uploads_data:/app/public/uploads
     depends_on:
+      deep-research-service:
+        condition: service_healthy
       postgres:
         condition: service_healthy
       redis:
