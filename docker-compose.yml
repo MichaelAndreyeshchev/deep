@@ -45,7 +45,7 @@ services:
       # Required for Docker setup
       NEXTAUTH_URL_INTERNAL: http://app:3000
       PYTHON_SERVICE_URL: http://deep-research-service:8001
-      NODE_ENV: development
+      NODE_ENV: production
     volumes:
       # Mount uploads directory so files persist
       - uploads_data:/app/public/uploads

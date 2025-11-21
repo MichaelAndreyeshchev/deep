@@ -3,6 +3,7 @@ import { Redis } from '@upstash/redis';
 // Mock Redis client that handles local Redis connections
 class LocalRedisWrapper {
   private connected = false;
+  private zsets: Map<string, Map<string, number>> = new Map();
 
   constructor(config: { url?: string; token?: string }) {
     // For local development, we don't need to actually connect
@@ -47,6 +48,67 @@ class LocalRedisWrapper {
   async scriptLoad(script: string) {
     // Mock script load - return a fake SHA
     return 'mock_sha_123456789';
+  }
+
+  async zincrby(key: string, increment: number, member: string) {
+    const set = this.zsets.get(key) || new Map();
+    const currentScore = set.get(member) || 0;
+    const newScore = currentScore + increment;
+    set.set(member, newScore);
+    this.zsets.set(key, set);
+    return newScore;
+  }
+
+  async zscore(key: string, member: string) {
+    const set = this.zsets.get(key);
+    if (!set) return null;
+    const score = set.get(member);
+    return score !== undefined ? score : null;
+  }
+
+  async zadd(key: string, score: number, member: string) {
+    const set = this.zsets.get(key) || new Map();
+    set.set(member, score);
+    this.zsets.set(key, set);
+    return 1;
+  }
+
+  async zrange(key: string, start: number, stop: number, options?: { withScores?: boolean }) {
+    const set = this.zsets.get(key);
+    if (!set) return [];
+    
+    const entries = Array.from(set.entries()).sort((a, b) => a[1] - b[1]);
+    const slice = entries.slice(start, stop === -1 ? undefined : stop + 1);
+    
+    if (options?.withScores) {
+      return slice.flatMap(([member, score]) => [member, score]);
+    }
+    return slice.map(([member]) => member);
+  }
+
+  async zrevrange(key: string, start: number, stop: number, options?: { withScores?: boolean }) {
+    const set = this.zsets.get(key);
+    if (!set) return [];
+    
+    const entries = Array.from(set.entries()).sort((a, b) => b[1] - a[1]);
+    const slice = entries.slice(start, stop === -1 ? undefined : stop + 1);
+    
+    if (options?.withScores) {
+      return slice.flatMap(([member, score]) => [member, score]);
+    }
+    return slice.map(([member]) => member);
+  }
+
+  async zcard(key: string) {
+    const set = this.zsets.get(key);
+    return set ? set.size : 0;
+  }
+
+  async zrem(key: string, member: string) {
+    const set = this.zsets.get(key);
+    if (!set) return 0;
+    const deleted = set.delete(member);
+    return deleted ? 1 : 0;
   }
 }
 
